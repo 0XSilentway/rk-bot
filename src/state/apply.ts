@@ -77,8 +77,9 @@ export function applyEvent(world: WorldState, ev: PacketEvent): void {
     case 'damage': {
       const a = world.actors.get(ev.victimId);
       if (a) a.lastSeenTs = ev.ts;
-      if (ev.victimId === world.self.id && ev.damage > 0) {
-        world.lastHitByMobTs = ev.ts;
+      // 0x17 DAMAGE_V2 has no attacker field; keep prior lastHitBy if any
+      if (ev.victimId === world.self.id && ev.damage > 0 && !world.lastHitBy) {
+        world.lastHitBy = { attackerId: 0, ts: ev.ts };
       }
       return;
     }
@@ -94,7 +95,7 @@ export function applyEvent(world: WorldState, ev: PacketEvent): void {
         }
       }
       if (ev.victimId === world.self.id && ev.attackerId !== world.self.id) {
-        world.lastHitByMobTs = ev.ts;
+        world.lastHitBy = { attackerId: ev.attackerId, ts: ev.ts };
       }
       return;
     }

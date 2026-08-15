@@ -1,0 +1,47 @@
+# ================================================================
+# rk-bot mon_control — per-monster rules (OpenKore-style)
+# ================================================================
+#
+# Edit this file at runtime; bot reloads automatically.
+#
+# Each entry has TWO knobs:
+#
+#   attack:    0 = ignore (never target)
+#              1 = auto (attack on sight if a skill rule matches)
+#              2 = only if this mob attacks us first
+#
+#   teleport:  0 = never wing because of this mob
+#              1 = wing when this mob attacks us (fires on 0x0B miss too)
+#              2 = wing on SIGHT — mob within teleport_range tiles → wing
+#
+# The 'default' entry applies to any mob NOT listed below.
+# Names are matched case-insensitively as SUBSTRING (so 'chonchon'
+# matches 'Steel Chonchon').
+#
+# Skill assignment lives in bot.yaml (skills:). A mob with attack=1
+# but no matching skill rule is ignored.
+#
+# ================================================================
+
+teleport_range: 12          # sight-wing radius in tiles
+
+default:
+  attack: 0                 # unlisted mobs → ignore
+  teleport: 0
+
+# --- moc_fld17 mob list (Map / Monster / Item DB) ------------------
+
+Hode:            { attack: 1, teleport: 0 }   # lv 70, non-aggressive, safe to tank
+Steel Chonchon:  { attack: 1, teleport: 1 }   # lv 30, hits us → wing
+Deniro:          { attack: 1, teleport: 1 }   # lv 20, wing when it attacks
+Piere:           { attack: 1, teleport: 1 }   # lv 20, wing when it attacks
+Frilldora:       { attack: 0, teleport: 0 }   # lv 15, ignore
+Ant Egg:         { attack: 0, teleport: 0 }   # lv 10, ignore
+
+# --- keep-away examples (comment/uncomment as needed) ---
+
+# Sandman:       { attack: 0, teleport: 2 }   # wing on sight
+# Osiris:        { attack: 0, teleport: 2 }
+# Ghostring:     { attack: 0, teleport: 2 }
+
+# --- add more mobs here ---

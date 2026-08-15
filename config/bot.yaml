@@ -16,16 +16,8 @@ skills:
   - match: [piere]
     skill: { id: 11, level: 6 }         # Fire Bolt lv 6
 
-# Per-mob targeting policy.
-# default   = what to do for mobs not listed
-# auto      = attack when found
-# skip      = never attack
-mon_control:
-  default: skip
-  Hode: auto
-  Steel Chonchon: auto
-  Deniro: auto
-  Piere: auto
+# Per-mob targeting + teleport rules live in config/mon_control.yaml
+# (edit that file separately; hot-reloaded too).
 
 # Movement toward target
 combat:
@@ -34,11 +26,12 @@ combat:
   move_debounce_ms: 400
   cast_debounce_ms: 2500
 
-# Emergency escape via Fly Wing
+# Emergency escape via Fly Wing.
+# Per-mob wing rules are in mon_control.yaml (teleport: 1 or 2).
+# This block controls the global HP-safety net.
 emergency:
-  fly_wing_item_id: 601                 # confirmed from user's manual use
-  hp_pct_threshold: 30                  # HP < 30% → wing
-  wing_on_hit: true                     # any hit taken → wing
+  fly_wing_item_id: 601                 # confirmed
+  hp_pct_threshold: 30                  # HP < 30% → wing regardless of mob
   wing_cooldown_ms: 4000                # min delay between wings
 
 # Loot

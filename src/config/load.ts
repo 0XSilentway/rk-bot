@@ -11,7 +11,6 @@ export interface BotConfig {
   enabled: boolean;
   tick_ms: number;
   skills: SkillRule[];
-  mon_control: { default: 'auto' | 'skip' | 'if_attacked' } & Record<string, 'auto' | 'skip' | 'if_attacked'>;
   combat: {
     cast_range_cells: number;
     approach_stop_short: number;
@@ -21,7 +20,6 @@ export interface BotConfig {
   emergency: {
     fly_wing_item_id: number;
     hp_pct_threshold: number;
-    wing_on_hit: boolean;
     wing_cooldown_ms: number;
   };
   loot: {

@@ -1,6 +1,7 @@
 import type { WorldState } from '../state/world';
 import type { Actor, Drop } from '../state/actor';
 import { loadConfig, watchConfig, onConfigChange, type BotConfig, type SkillRule } from '../config/load';
+import { loadMonControl, watchMonControl, onMonControlChange, ruleFor, type MonRule } from '../config/mon-control';
 import { buildMove, buildPickup, buildRespawn, buildSkillTarget, buildUseItem } from '../packet/encode';
 
 type Send = (bytes: Uint8Array) => void;
@@ -32,8 +33,11 @@ export function startBrain(world: WorldState, send: Send): BrainState {
   };
 
   const cfg0 = loadConfig();
+  loadMonControl();
   watchConfig();
-  onConfigChange(c => console.log('[brain] config reloaded — skills:', c.skills.length, 'mon_control keys:', Object.keys(c.mon_control).length));
+  watchMonControl();
+  onConfigChange(c => console.log('[brain] bot.yaml reloaded — skills:', c.skills.length));
+  onMonControlChange(d => console.log('[brain] mon_control reloaded —', d.entries.size, 'rules'));
   s.paused = !cfg0.enabled;
 
   setInterval(() => tick(world, send, s), cfg0.tick_ms);
@@ -56,12 +60,6 @@ function matchSkill(cfg: BotConfig, name: string | undefined): SkillRule | undef
   return undefined;
 }
 
-function policyFor(cfg: BotConfig, name: string | undefined): 'auto' | 'skip' | 'if_attacked' {
-  if (!name) return cfg.mon_control.default;
-  // exact-name lookup first, then default
-  return cfg.mon_control[name] ?? cfg.mon_control.default;
-}
-
 function tick(world: WorldState, send: Send, s: BrainState): void {
   if (s.paused) return;
   const cfg = loadConfig();
@@ -80,17 +78,42 @@ function tick(world: WorldState, send: Send, s: BrainState): void {
   }
 
   const now = Date.now();
+  const mc = loadMonControl();
 
-  // 2) Emergency wing — recently hit OR HP low
+  // 2) Emergency wing — 3 triggers:
+  //    (a) HP below global threshold
+  //    (b) recently hit by mob with teleport=1
+  //    (c) mob with teleport=2 within teleport_range tiles
   const hpPct = self.hp && self.hpMax ? (self.hp / self.hpMax) * 100 : 100;
-  const hitRecently = world.lastHitByMobTs !== undefined && now - world.lastHitByMobTs < 1500;
-  const shouldWing =
-    (hpPct < cfg.emergency.hp_pct_threshold) || (cfg.emergency.wing_on_hit && hitRecently);
-  if (shouldWing && now - s.lastWingTs >= cfg.emergency.wing_cooldown_ms) {
-    console.log(`[brain] 🕊 FLY WING (HP=${hpPct.toFixed(0)}% hit=${hitRecently ? 'yes' : 'no'})`);
+  let wingReason = '';
+
+  if (hpPct < cfg.emergency.hp_pct_threshold) {
+    wingReason = `HP=${hpPct.toFixed(0)}%`;
+  } else if (world.lastHitBy && now - world.lastHitBy.ts < 1500) {
+    const attacker = world.actors.get(world.lastHitBy.attackerId);
+    const rule = ruleFor(mc, attacker?.name);
+    if (rule.teleport === 1) wingReason = `attacked by ${attacker?.name ?? 'unknown'} (t=1)`;
+  }
+  if (!wingReason) {
+    // sight-wing (teleport=2)
+    for (const m of world.actors.values()) {
+      if (!m.alive || !m.pos || m.kind !== 'monster') continue;
+      const rule = ruleFor(mc, m.name);
+      if (rule.teleport !== 2) continue;
+      const d = dist(self.pos, m.pos);
+      if (d <= mc.teleport_range) {
+        wingReason = `sighted ${m.name} @ ${d.toFixed(1)}t (t=2)`;
+        break;
+      }
+    }
+  }
+
+  if (wingReason && now - s.lastWingTs >= cfg.emergency.wing_cooldown_ms) {
+    console.log(`[brain] 🕊 FLY WING — ${wingReason}`);
     send(buildUseItem(cfg.emergency.fly_wing_item_id));
     s.lastWingTs = now;
     s.lastActionTs = now;
+    world.lastHitBy = undefined;
     return;
   }
 
@@ -175,6 +198,7 @@ function pickTarget(
   cfg: BotConfig,
   selfPos: { x: number; y: number },
 ): { actor: Actor; skill: { id: number; level: number } } | undefined {
+  const mc = loadMonControl();
   let best: Actor | undefined;
   let bestSkill: { id: number; level: number } | undefined;
   let bestD = Infinity;
@@ -182,15 +206,20 @@ function pickTarget(
   for (const m of world.actors.values()) {
     if (m.id === selfId || !m.alive || !m.pos) continue;
     if (m.kind !== 'monster') continue;
-    const policy = policyFor(cfg, m.name);
-    if (policy === 'skip') continue;
-    const rule = matchSkill(cfg, m.name);
-    if (!rule) continue; // no skill = can't attack this mob → skip
+    const mr: MonRule = ruleFor(mc, m.name);
+    if (mr.attack === 0) continue;
+    // attack=2 (if_attacked) — require this mob has hit us recently
+    if (mr.attack === 2) {
+      const hit = world.lastHitBy;
+      if (!hit || hit.attackerId !== m.id || Date.now() - hit.ts > 5000) continue;
+    }
+    const skillRule = matchSkill(cfg, m.name);
+    if (!skillRule) continue;
     const d = dist(selfPos, m.pos);
     if (d < bestD) {
       bestD = d;
       best = m;
-      bestSkill = rule.skill;
+      bestSkill = skillRule.skill;
     }
   }
   if (!best || !bestSkill) return undefined;
