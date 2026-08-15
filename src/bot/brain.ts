@@ -1,7 +1,7 @@
 import type { WorldState } from '../state/world';
 import type { Actor, Drop } from '../state/actor';
 import { botConfig, matchRule } from './config';
-import { buildAttack, buildMove, buildPickup, buildRespawn, buildSkillTarget } from '../packet/encode';
+import { buildMove, buildPickup, buildRespawn, buildSkillTarget } from '../packet/encode';
 
 type Send = (bytes: Uint8Array) => void;
 
@@ -78,22 +78,19 @@ function tick(world: WorldState, send: Send, s: BrainState): void {
     return;
   }
 
-  // 4) Find target mob matching rules
-  const target = pickTarget(world, self.pos);
-  if (!target) return;
-  const rule = matchRule(target.name);
-  if (!rule) return;
-
+  // 4) Find target
+  const picked = pickTarget(world, self.pos);
+  if (!picked) return;
+  const { actor: target, skill } = picked;
   if (!target.pos) return;
   const d = dist(self.pos, target.pos);
+  const label = `${target.name ?? '?'}#${target.id.toString(16).slice(-4)}`;
 
   // 5) In range → cast skill (with debounce)
   if (d <= botConfig.castRangeCells) {
     if (now - s.lastCastTs >= botConfig.castDebounceMs) {
-      console.log(
-        `[brain] cast skill=${rule.skill.id} lv=${rule.skill.level} on ${target.name}#${target.id.toString(16).slice(-4)} d=${d.toFixed(1)}`,
-      );
-      send(buildSkillTarget(target.id, rule.skill.id, rule.skill.level));
+      console.log(`[brain] cast skill=${skill.id} lv=${skill.level} on ${label} d=${d.toFixed(1)}`);
+      send(buildSkillTarget(target.id, skill.id, skill.level));
       s.lastCastTs = now;
       s.lastTargetId = target.id;
     }
@@ -103,36 +100,39 @@ function tick(world: WorldState, send: Send, s: BrainState): void {
   // 6) Out of range → move toward, but stop within range
   if (now - s.lastMoveTs < botConfig.moveDebounceMs) return;
   const step = stepToward(self.pos, target.pos, botConfig.castRangeCells - botConfig.approachStopShortCells);
-  // don't resend same coord unless we've been idle a while
   if (
     s.lastMoveTo &&
     s.lastMoveTo.x === step.x &&
     s.lastMoveTo.y === step.y &&
     now - s.lastMoveTs < 3000
   ) return;
-  console.log(
-    `[brain] move to (${step.x},${step.y}) toward ${target.name}#${target.id.toString(16).slice(-4)} (d=${d.toFixed(1)})`,
-  );
+  console.log(`[brain] move to (${step.x},${step.y}) toward ${label} (d=${d.toFixed(1)})`);
   send(buildMove(step.x, step.y));
   s.lastMoveTs = now;
   s.lastMoveTo = step;
 }
 
-function pickTarget(world: WorldState, selfPos: { x: number; y: number }): Actor | undefined {
+function pickTarget(
+  world: WorldState,
+  selfPos: { x: number; y: number },
+): { actor: Actor; skill: { id: number; level: number } } | undefined {
   let best: Actor | undefined;
   let bestD = Infinity;
   const selfId = world.self.id;
   for (const m of world.actors.values()) {
-    // kind detection from 0x06 SPAWN is unreliable — filter by name + not-self
     if (m.id === selfId || !m.alive || !m.pos) continue;
-    if (!matchRule(m.name)) continue;
+    if (m.kind === 'npc') continue;
+    if (!botConfig.attackAll && !matchRule(m.name)) continue;
     const d = dist(selfPos, m.pos);
     if (d < bestD) {
       bestD = d;
       best = m;
     }
   }
-  return best;
+  if (!best) return undefined;
+  const rule = matchRule(best.name);
+  const skill = rule ? rule.skill : botConfig.attackAllSkill;
+  return { actor: best, skill };
 }
 
 function pickupTarget(

@@ -11,6 +11,12 @@ export interface MonsterRule {
 export const botConfig = {
   enabled: true, // master switch; bot.enable()/bot.disable() also toggle
 
+  /** If true, ignore monster name rules and attack ANY actor near self.
+   *  Useful when pre-existing map mobs never sent 0x06 SPAWN (so name is unknown). */
+  attackAll: true,
+  /** Skill to cast in attackAll mode */
+  attackAllSkill: { id: 12, level: 6 },
+
   /** How often the brain wakes up to decide next action */
   tickMs: 500,
 

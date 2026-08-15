@@ -37,6 +37,20 @@ export class WorldState {
     this.actors.delete(id);
   }
 
+  /** Any actor that isn't obviously self / npc / player and is alive with a position. */
+  targets(): Actor[] {
+    const out: Actor[] = [];
+    for (const a of this.actors.values()) {
+      if (a.id === this.self.id) continue;
+      if (!a.alive) continue;
+      // NPCs never attack us; treat only spawn-confirmed npc as non-target
+      if (a.kind === 'npc') continue;
+      out.push(a);
+    }
+    return out;
+  }
+
+  /** Only actors explicitly known to be monsters (via 0x06 SPAWN kind=1). */
   monsters(): Actor[] {
     const out: Actor[] = [];
     for (const a of this.actors.values()) if (a.kind === 'monster' && a.alive) out.push(a);
