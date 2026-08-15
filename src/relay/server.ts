@@ -152,16 +152,14 @@ function handle(
       if (kind === 'binary' && msg.data) bytes = base64ToBytes(msg.data);
       else if (kind === 'text' && msg.data) text = msg.data;
       log.frame(seq, msg.ts, msg.id ?? 0, dir, kind, bytes, text);
+      if (verbose && bytes && bytes.length > 1) {
+        const hex = Array.from(bytes.slice(0, 20)).map(b => b.toString(16).padStart(2,'0')).join('');
+        console.log(`[${dir}] op=0x${bytes[0]!.toString(16).padStart(2,'0')} len=${bytes.length} ${hex}${bytes.length > 20 ? '...' : ''}`);
+      }
       if (dir === 'recv' && bytes) {
         if (typeof msg.id === 'number') setActiveWs(msg.id);
         try {
-          for (const ev of decodeAll(bytes, msg.ts)) {
-            applyEvent(world, ev);
-            if (verbose) {
-              const hex = Array.from(bytes.slice(0, 20)).map(b => b.toString(16).padStart(2,'0')).join('');
-              console.log(`[dec] op=0x${ev.op.toString(16).padStart(2,'0')} kind=${ev.kind} len=${bytes.length} ${hex}${bytes.length > 20 ? '...' : ''}`);
-            }
-          }
+          for (const ev of decodeAll(bytes, msg.ts)) applyEvent(world, ev);
         } catch (e) {
           console.warn('[relay] decode error', e);
         }
