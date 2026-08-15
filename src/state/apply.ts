@@ -35,8 +35,8 @@ export function applyEvent(world: WorldState, ev: PacketEvent): void {
     case 'move': {
       const a = world.getOrCreate(ev.actorId);
       a.posTo = ev.to;
-      // start-of-move: pos still current; snap after MOVE_UPDATE arrives without a follow
-      a.pos = a.pos ?? ev.to;
+      a.pos = ev.to; // best-effort: overwrite every move
+      a.alive = true;
       a.lastSeenTs = ev.ts;
       if (ev.actorId === world.self.id) world.self.pos = ev.to;
       return;
@@ -60,10 +60,14 @@ export function applyEvent(world: WorldState, ev: PacketEvent): void {
 
     case 'action': {
       // action=3 = entity died. Kind detection from spawn is unreliable, so
-      // count kills for any non-self actor.
+      // count kills for any non-self actor. Hard-remove after mark so brain
+      // stops chasing corpses.
       if (ev.action === 3 && ev.actorId !== world.self.id) {
         const a = world.actors.get(ev.actorId);
-        if (a) a.alive = false;
+        if (a) {
+          a.alive = false;
+          world.actors.delete(ev.actorId);
+        }
         world.killsSession++;
       }
       return;

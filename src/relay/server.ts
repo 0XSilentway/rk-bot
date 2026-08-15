@@ -80,15 +80,35 @@ export function startRelay(opts: RelayOpts) {
     },
   });
 
-  // simple CLI over stdin — type "pause" / "resume" / "stat"
+  // simple CLI over stdin
   process.stdin.setEncoding('utf-8');
   process.stdin.on('data', (buf) => {
     const line = buf.toString().trim().toLowerCase();
     if (line === 'pause') pauseBrain(brain);
     else if (line === 'resume') resumeBrain(brain);
     else if (line === 'stat') dumpStat(world);
+    else if (line === 'dump') dumpActors(world);
+    else if (line === 'verbose') { verbose = !verbose; console.log('[relay] verbose =', verbose); }
   });
-  console.log('[relay] cli: type "pause", "resume", "stat"');
+  console.log('[relay] cli: pause | resume | stat | dump | verbose');
+}
+
+let verbose = false;
+
+function dumpActors(world: WorldState) {
+  console.log(`\n=== ACTORS (${world.actors.size}) ===`);
+  for (const a of world.actors.values()) {
+    const pos = a.pos ? `(${a.pos.x},${a.pos.y})` : '?';
+    const posTo = a.posTo ? ` →(${a.posTo.x},${a.posTo.y})` : '';
+    console.log(
+      `  id=0x${a.id.toString(16).padStart(8, '0')} kind=${a.kind} name=${a.name ?? '?'} pos=${pos}${posTo} alive=${a.alive}`,
+    );
+  }
+  console.log(`=== DROPS (${world.drops.size}) ===`);
+  for (const d of world.drops.values()) {
+    console.log(`  id=0x${d.dropId.toString(16)} item=${d.itemId} amt=${d.amount} at=(${d.at.x.toFixed(1)},${d.at.y.toFixed(1)})`);
+  }
+  console.log('');
 }
 
 function dumpStat(world: WorldState) {
@@ -135,7 +155,13 @@ function handle(
       if (dir === 'recv' && bytes) {
         if (typeof msg.id === 'number') setActiveWs(msg.id);
         try {
-          for (const ev of decodeAll(bytes, msg.ts)) applyEvent(world, ev);
+          for (const ev of decodeAll(bytes, msg.ts)) {
+            applyEvent(world, ev);
+            if (verbose) {
+              const hex = Array.from(bytes.slice(0, 20)).map(b => b.toString(16).padStart(2,'0')).join('');
+              console.log(`[dec] op=0x${ev.op.toString(16).padStart(2,'0')} kind=${ev.kind} len=${bytes.length} ${hex}${bytes.length > 20 ? '...' : ''}`);
+            }
+          }
         } catch (e) {
           console.warn('[relay] decode error', e);
         }
