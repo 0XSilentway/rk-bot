@@ -14,8 +14,10 @@ export const botConfig = {
   /** If true, ignore monster name rules and attack ANY actor near self.
    *  Useful when pre-existing map mobs never sent 0x06 SPAWN (so name is unknown). */
   attackAll: true,
-  /** Skill to cast in attackAll mode */
-  attackAllSkill: { id: 12, level: 6 },
+  /** Skill to cast in attackAll mode.
+   *  Confirmed working: skill 12 = Cold/Frost Bolt at the user's learned level.
+   *  Note: RayRag rejects skill packets with level != learned level. */
+  attackAllSkill: { id: 12, level: 9 },
 
   /** How often the brain wakes up to decide next action */
   tickMs: 500,
@@ -41,12 +43,16 @@ export const botConfig = {
   /** if own HP percentage drops below this, disengage (do NOT continue attacking) */
   disengageHpPct: 30,
 
-  /** monster targeting rules — first match wins */
+  /** monster targeting rules — first match wins.
+   *  Skill IDs (RayRag): 12 = Cold/Frost Bolt.
+   *  Fire Bolt id TBD — capture your own cast then update.
+   *  Level MUST match your learned level or server rejects. */
   monsters: [
-    { namePattern: 'peco', skill: { id: 15, level: 8 } },      // Cold/Frost Bolt lv 8
-    { namePattern: 'egg',  skill: { id: 15, level: 8 } },      // Peco Peco Egg fallback
-    { namePattern: 'muka', skill: { id: 12, level: 6 } },      // Fire Bolt-ish lv 6
-    { namePattern: 'ant',  skill: { id: 12, level: 6 } },      // Ant family
+    { namePattern: 'peco', skill: { id: 12, level: 9 } },   // Frost Bolt lv 9 (change lv to your learned)
+    { namePattern: 'egg',  skill: { id: 12, level: 9 } },
+    { namePattern: 'muka', skill: { id: 12, level: 9 } },   // TODO: swap to Fire Bolt id when known
+    { namePattern: 'ant',  skill: { id: 12, level: 9 } },
+    { namePattern: 'condor', skill: { id: 12, level: 9 } },
   ] as MonsterRule[],
 };
 
