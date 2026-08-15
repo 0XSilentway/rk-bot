@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         rk-bot injector
 // @namespace    rk-bot
-// @version      0.3.0
+// @version      0.4.0
 // @description  WS proxy + injector for rayrag Unity WebGL — pipes raw frames to local bot relay and injects commands back
 // @match        https://websea01.rayrag.com/*
 // @match        https://*.rayrag.com/*
@@ -59,7 +59,10 @@
             const bin = atob(cmd.data);
             const u8 = new Uint8Array(bin.length);
             for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
-            target.send(u8.buffer);
+            // superogira sends Uint8Array directly (not .buffer) — matches game's own send behavior
+            target.send(u8);
+            const hex = Array.from(u8).map(b => b.toString(16).padStart(2,'0')).join('');
+            console.log('%c[rk-bot] inject → ' + hex, 'color:#0ff');
           } catch (e) {
             console.warn('[rk-bot] inject decode failed', e);
           }
