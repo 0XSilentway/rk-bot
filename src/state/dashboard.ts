@@ -26,6 +26,7 @@ export function startDashboard(world: WorldState, intervalMs = 1000): void {
     const hints: string[] = [];
     if (s.id === undefined) hints.push('[HINT] no self id — click Login in the game window first');
     else if (!s.pos) hints.push('[HINT] no self pos — click to move 1 step');
+    if (world.inventoryFull) hints.push('[HINT] 🎒 INVENTORY FULL — deposit at Kafra, then "resume" to warp back');
     const withPos = mobs.filter(m => m.pos).length;
     if (mobs.length > 0 && withPos === 0) {
       hints.push('[HINT] targets tracked but no pos yet — mob needs to move once');

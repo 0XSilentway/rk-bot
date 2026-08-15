@@ -106,6 +106,11 @@ export interface EvSelectChar extends DecodedBase {
   mapName?: string;
 }
 
+export interface EvSysMessage extends DecodedBase {
+  kind: 'sys_message';
+  text: string;
+}
+
 export interface EvSkillResult extends DecodedBase {
   kind: 'skill_result';
   srcId: number;
@@ -135,4 +140,5 @@ export type PacketEvent =
   | EvMapName
   | EvSelectChar
   | EvSkillResult
+  | EvSysMessage
   | EvUnknown;

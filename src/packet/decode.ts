@@ -197,6 +197,13 @@ export function decodeFrame(bytes: Uint8Array, ts: number): PacketEvent {
       return { ...base, kind: 'skill_result', srcId, dstId, skillId, damage };
     }
 
+    case 0x20: {
+      // SYS_MESSAGE: [20][text UTF-8...] — used for 'too full' detection
+      if (bytes.length < 2) return { ...base, kind: 'unknown' };
+      const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes.subarray(1));
+      return { ...base, kind: 'sys_message', text };
+    }
+
     case 0x22: {
       // EXP: [22][base_tot:u32][base_gain:u32][job_tot:u32][job_gain:u32]
       if (bytes.length < 17) return { ...base, kind: 'unknown' };

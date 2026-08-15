@@ -54,7 +54,7 @@ export function startRelay(opts: RelayOpts) {
   // Web dashboard on port +1
   startMonitor(opts.port + 1, world, {
     pause: () => pauseBrain(brain),
-    resume: () => resumeBrain(brain),
+    resume: () => resumeBrain(brain, world, send),
     isPaused: () => (brain as unknown as { paused: boolean }).paused,
   });
 
@@ -93,7 +93,7 @@ export function startRelay(opts: RelayOpts) {
   process.stdin.on('data', (buf) => {
     const line = buf.toString().trim().toLowerCase();
     if (line === 'pause') pauseBrain(brain);
-    else if (line === 'resume') resumeBrain(brain);
+    else if (line === 'resume') resumeBrain(brain, world, send);
     else if (line === 'stat') dumpStat(world);
     else if (line === 'dump') dumpActors(world);
     else if (line === 'verbose') { verbose = !verbose; console.log('[relay] verbose =', verbose); }

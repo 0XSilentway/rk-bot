@@ -18,6 +18,9 @@ tickMs 500
 # Cast range in tiles (Bolt spells = 9)
 attackDistance 9
 
+# Melee range for basic attack (skill=0 in mon_control.txt)
+attackMeleeDistance 2
+
 # Stop-short (walk to attackDistance - approachStopShort)
 attackApproachStopShort 2
 
@@ -29,17 +32,37 @@ attackCastDebounce 2500
 
 
 ######## Emergency wing ########
-# Fly Wing item ID (RayRag = 601)
+# 1 = use direct 0x40 teleport packet (free, no item)
+# 0 = use Fly Wing item (0x2F, consumes item)
+useTeleportPacket 1
+
+# Fly Wing item ID (only used if useTeleportPacket 0). RayRag = 601
 flyWingItemID 601
 
 # Wing when own HP % drops below this (safety net)
 teleportOnHPPct 30
 
-# Min ms between two wings (item cooldown)
+# Min ms between two wings
 wingCooldownMs 4000
 
 # Sight range for teleport=2 rules (tiles)
 teleportSightRange 12
+
+
+######## Home / Kafra (auto-return when inventory full) ########
+# Where to warp when inventory fills up (usually near your Kafra Staff)
+homeMap prt_fild08
+homeX 159
+homeY 362
+
+# Where to warp back to after storage (your farm spot)
+farmMap moc_fld17
+farmX 250
+farmY 210
+
+# 1 = auto-warp back to farm after user resume
+# 0 = stay at home, user warps back manually
+autoReturnAfterResume 1
 
 
 ######## Loot ########

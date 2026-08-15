@@ -26,6 +26,9 @@ export class WorldState {
   /** Set when a mob attacks self (0x0B victim=self or 0x17 damage victim=self). */
   lastHitBy?: { attackerId: number; ts: number };
 
+  /** Set true when 0x20 SYS_MESSAGE indicates inventory is full. Cleared on user resume. */
+  inventoryFull = false;
+
   getOrCreate(id: number, kind: Actor['kind'] = 'unknown'): Actor {
     let a = this.actors.get(id);
     if (!a) {

@@ -9,13 +9,22 @@ export interface BotConfig {
   enabled: boolean;
   tickMs: number;
   attackDistance: number;
+  attackMeleeDistance: number;
   attackApproachStopShort: number;
   attackMoveDebounce: number;
   attackCastDebounce: number;
+  useTeleportPacket: boolean;
   flyWingItemID: number;
   teleportOnHPPct: number;
   wingCooldownMs: number;
   teleportSightRange: number;
+  homeMap: string;
+  homeX: number;
+  homeY: number;
+  farmMap: string;
+  farmX: number;
+  farmY: number;
+  autoReturnAfterResume: boolean;
   lootAll: boolean;
   lootMaxAgeMs: number;
   lootRange: number;
@@ -59,13 +68,22 @@ function loadOnce(): BotConfig {
     enabled: toBool(kv.enabled, true),
     tickMs: toNum(kv.tickMs, 500),
     attackDistance: toNum(kv.attackDistance, 9),
+    attackMeleeDistance: toNum(kv.attackMeleeDistance, 2),
     attackApproachStopShort: toNum(kv.attackApproachStopShort, 2),
     attackMoveDebounce: toNum(kv.attackMoveDebounce, 400),
     attackCastDebounce: toNum(kv.attackCastDebounce, 2500),
+    useTeleportPacket: toBool(kv.useTeleportPacket, true),
     flyWingItemID: toNum(kv.flyWingItemID, 601),
     teleportOnHPPct: toNum(kv.teleportOnHPPct, 30),
     wingCooldownMs: toNum(kv.wingCooldownMs, 4000),
     teleportSightRange: toNum(kv.teleportSightRange, 12),
+    homeMap: kv.homeMap ?? '',
+    homeX: toNum(kv.homeX, 0),
+    homeY: toNum(kv.homeY, 0),
+    farmMap: kv.farmMap ?? '',
+    farmX: toNum(kv.farmX, 0),
+    farmY: toNum(kv.farmY, 0),
+    autoReturnAfterResume: toBool(kv.autoReturnAfterResume, true),
     lootAll: toBool(kv.lootAll, true),
     lootMaxAgeMs: toNum(kv.lootMaxAgeMs, 30000),
     lootRange: toNum(kv.lootRange, 12),

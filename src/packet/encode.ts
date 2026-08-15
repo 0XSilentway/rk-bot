@@ -82,3 +82,26 @@ export function buildUseItem(itemId: number, targetId = 0xffffffff): Uint8Array 
   writeU32LE(b, 5, targetId);
   return b;
 }
+
+/**
+ * 0x40 map warp — server accepts direct warp without Kafra dialog on RayRag.
+ * Layout: [40][mapname_len:u16 LE][mapname UTF-8][x:i16 LE][y:i16 LE][00]
+ * Verified from Session A and superogira sendTeleport() line 850.
+ */
+export function buildWarp(mapName: string, x: number, y: number): Uint8Array {
+  const nameBytes = new TextEncoder().encode(mapName);
+  const b = new Uint8Array(1 + 2 + nameBytes.length + 2 + 2 + 1);
+  let p = 0;
+  b[p++] = 0x40;
+  writeU16LE(b, p, nameBytes.length); p += 2;
+  b.set(nameBytes, p); p += nameBytes.length;
+  writeI16LE(b, p, x); p += 2;
+  writeI16LE(b, p, y); p += 2;
+  b[p] = 0x00;
+  return b;
+}
+
+/** Random-spot warp within the current map. Server treats (-999,-999) as random. */
+export function buildWarpRandom(mapName: string): Uint8Array {
+  return buildWarp(mapName, -999, -999);
+}

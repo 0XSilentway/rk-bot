@@ -139,6 +139,20 @@ export function applyEvent(world: WorldState, ev: PacketEvent): void {
       if (ev.actorId === world.self.id) world.self.dead = true;
       return;
 
+    case 'sys_message': {
+      const t = ev.text.toLowerCase();
+      if (
+        t.includes('too full') ||
+        t.includes('inventory is full') ||
+        t.includes('cannot carry') ||
+        t.includes('กระเป๋าเต็ม')
+      ) {
+        if (!world.inventoryFull) console.log('[state] 🎒 inventory FULL detected');
+        world.inventoryFull = true;
+      }
+      return;
+    }
+
     case 'skill_result':
     case 'unknown':
       return;

@@ -6,7 +6,7 @@ import { loadPickup, watchPickup, pickupFlagFor } from '../config/pickupitems';
 import { loadAvoid, watchAvoid, avoidRuleFor } from '../config/avoid';
 import { loadItemsControl, watchItemsControl } from '../config/items-control';
 import { loadShop, watchShop } from '../config/shop';
-import { buildAttack, buildMove, buildPickup, buildRespawn, buildSkillTarget, buildUseItem } from '../packet/encode';
+import { buildAttack, buildMove, buildPickup, buildRespawn, buildSkillTarget, buildUseItem, buildWarp, buildWarpRandom } from '../packet/encode';
 
 type Send = (bytes: Uint8Array) => void;
 
@@ -22,6 +22,8 @@ interface BrainState {
   lastActionTs: number;
   lastWingTs: number;
   paused: boolean;
+  /** true when bot auto-warped home for storage; user resumes to return to farm */
+  atHomeForStorage: boolean;
 }
 
 export function startBrain(world: WorldState, send: Send): BrainState {
@@ -34,6 +36,7 @@ export function startBrain(world: WorldState, send: Send): BrainState {
     lastActionTs: Date.now(),
     lastWingTs: 0,
     paused: false,
+    atHomeForStorage: false,
   };
 
   const cfg0 = loadConfig();
@@ -123,12 +126,30 @@ function tick(world: WorldState, send: Send, s: BrainState): void {
 
   if (wingReason && now - s.lastWingTs >= cfg.wingCooldownMs) {
     console.log(`[brain] 🕊 FLY WING — ${wingReason}`);
-    send(buildUseItem(cfg.flyWingItemID));
+    if (cfg.useTeleportPacket && self.map) send(buildWarpRandom(self.map));
+    else send(buildUseItem(cfg.flyWingItemID));
     s.lastWingTs = now;
     s.lastActionTs = now;
     world.lastHitBy = undefined;
     return;
   }
+
+  // 2b) Inventory full — warp home + pause combat state
+  if (world.inventoryFull && !s.atHomeForStorage) {
+    if (cfg.homeMap && cfg.homeX && cfg.homeY) {
+      console.log(`[brain] 🎒 inv full — warp home ${cfg.homeMap}(${cfg.homeX},${cfg.homeY})`);
+      send(buildWarp(cfg.homeMap, cfg.homeX, cfg.homeY));
+      s.atHomeForStorage = true;
+      s.lastActionTs = now;
+      return;
+    } else {
+      console.warn('[brain] inv full but homeMap not configured — clearing flag');
+      world.inventoryFull = false;
+    }
+  }
+
+  // Skip combat/loot while parked at home waiting for user
+  if (s.atHomeForStorage) return;
 
   // 3) Pickup
   const drop = pickupTarget(world, cfg, self.pos, s, now);
@@ -172,7 +193,8 @@ function tick(world: WorldState, send: Send, s: BrainState): void {
   const label = `${target.name ?? '?'}#${target.id.toString(16).slice(-4)}`;
 
   // 5) In range → cast skill OR basic attack (skill=0 = physical/melee class)
-  if (d <= cfg.attackDistance) {
+  const effectiveRange = rule.skill === 0 ? cfg.attackMeleeDistance : cfg.attackDistance;
+  if (d <= effectiveRange) {
     if (now - s.lastCastTs >= cfg.attackCastDebounce) {
       if (rule.skill === 0) {
         console.log(`[brain] attack ${label} d=${d.toFixed(1)} (basic 0x0B)`);
@@ -202,7 +224,7 @@ function tick(world: WorldState, send: Send, s: BrainState): void {
 
   // 6) Move toward
   if (now - s.lastMoveTs < cfg.attackMoveDebounce) return;
-  const step = stepToward(self.pos, target.pos, cfg.attackDistance - cfg.attackApproachStopShort);
+  const step = stepToward(self.pos, target.pos, effectiveRange - cfg.attackApproachStopShort);
   if (s.lastMoveTo && s.lastMoveTo.x === step.x && s.lastMoveTo.y === step.y && now - s.lastMoveTs < 3000) return;
   console.log(`[brain] move to (${step.x},${step.y}) toward ${label} (d=${d.toFixed(1)})`);
   send(buildMove(step.x, step.y));
@@ -293,4 +315,26 @@ function stepToward(
 }
 
 export function pauseBrain(s: BrainState): void { s.paused = true; console.log('[brain] paused'); }
-export function resumeBrain(s: BrainState): void { s.paused = false; console.log('[brain] resumed'); }
+
+/**
+ * Resume brain. If the bot was parked at home for storage, also fire a warp
+ * back to the farm spot and clear the inventoryFull flag — user should have
+ * finished depositing.
+ */
+export function resumeBrain(
+  s: BrainState,
+  world?: import('../state/world').WorldState,
+  send?: Send,
+): void {
+  s.paused = false;
+  console.log('[brain] resumed');
+  if (s.atHomeForStorage && world && send) {
+    const cfg = loadConfig();
+    if (cfg.autoReturnAfterResume && cfg.farmMap && cfg.farmX && cfg.farmY) {
+      console.log(`[brain] 🔙 return to farm ${cfg.farmMap}(${cfg.farmX},${cfg.farmY})`);
+      send(buildWarp(cfg.farmMap, cfg.farmX, cfg.farmY));
+    }
+    s.atHomeForStorage = false;
+    world.inventoryFull = false;
+  }
+}
