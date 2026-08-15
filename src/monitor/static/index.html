@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>rk-bot</title>
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<header>
+  <div class="brand">rk-bot</div>
+  <div class="ctrls">
+    <button id="btnResume" class="ok">▶ Resume</button>
+    <button id="btnPause"  class="warn">⏸ Pause</button>
+    <span class="state" id="botState">…</span>
+    <a href="https://websea01.rayrag.com/" target="_blank" class="btn ghost">🎮 Open game</a>
+  </div>
+</header>
+
+<main>
+  <section class="panel stats">
+    <h2>Character</h2>
+    <div id="statsGrid" class="grid"></div>
+  </section>
+
+  <section class="panel actors">
+    <h2>Actors <span id="actorCount" class="chip"></span></h2>
+    <table id="actorTable">
+      <thead><tr><th>Name</th><th>Kind</th><th>ID</th><th>Pos</th><th>Dist</th><th>Alive</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <section class="panel drops">
+    <h2>Drops <span id="dropCount" class="chip"></span></h2>
+    <table id="dropTable">
+      <thead><tr><th>ID</th><th>Item</th><th>Amt</th><th>Pos</th><th>Age</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <section class="panel config">
+    <h2>Config</h2>
+    <div class="tabs">
+      <button class="tab active" data-file="bot.yaml">bot.yaml</button>
+      <button class="tab" data-file="mon_control.yaml">mon_control.yaml</button>
+      <button id="btnSaveConfig" class="save">💾 Save</button>
+      <span class="saveNote" id="saveNote"></span>
+    </div>
+    <textarea id="configEditor" spellcheck="false"></textarea>
+  </section>
+
+  <section class="panel log">
+    <h2>Log</h2>
+    <pre id="logView"></pre>
+  </section>
+</main>
+
+<script src="/app.js"></script>
+</body>
+</html>

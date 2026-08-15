@@ -4,6 +4,7 @@ import { applyEvent } from '../state/apply';
 import { WorldState } from '../state/world';
 import { startDashboard } from '../state/dashboard';
 import { startBrain, pauseBrain, resumeBrain } from '../bot/brain';
+import { startMonitor } from '../monitor/server';
 import type { ServerWebSocket } from 'bun';
 
 type FrameKind = 'text' | 'binary' | 'blob-pending' | 'unknown';
@@ -47,6 +48,13 @@ export function startRelay(opts: RelayOpts) {
 
   startDashboard(world);
   const brain = startBrain(world, send);
+
+  // Web dashboard on port +1
+  startMonitor(opts.port + 1, world, {
+    pause: () => pauseBrain(brain),
+    resume: () => resumeBrain(brain),
+    isPaused: () => (brain as unknown as { paused: boolean }).paused,
+  });
 
   Bun.serve({
     port: opts.port,
