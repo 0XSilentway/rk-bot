@@ -10,6 +10,13 @@ function i16le(b: Uint8Array, off: number): number {
 function u32le(b: Uint8Array, off: number): number {
   return (b[off]! | (b[off + 1]! << 8) | (b[off + 2]! << 16) | (b[off + 3]! << 24)) >>> 0;
 }
+function i32le(b: Uint8Array, off: number): number {
+  const v = u32le(b, off);
+  return v > 0x7fffffff ? v - 0x100000000 : v;
+}
+function validCoord(x: number, y: number): boolean {
+  return x >= -500 && x <= 1000 && y >= -500 && y <= 1000;
+}
 function f32le(b: Uint8Array, off: number): number {
   const dv = new DataView(b.buffer, b.byteOffset + off, 4);
   return dv.getFloat32(0, true);
@@ -56,49 +63,78 @@ export function decodeFrame(bytes: Uint8Array, ts: number): PacketEvent {
     }
 
     case 0x06: {
-      // SPAWN layout (RE'd from Session F Picky sample):
-      //   0x00 op(06)  0x01 kind?  0x02..05 ?  0x06 marker 0x0F  0x07..0A id:u32
-      //   ...  name_len:u32 @0x18 + UTF8 name @0x1C  ...
-      //   Right after the name (offset 0x18 + 4 + name_len + 3), a pair of
-      //   u32 LE values that look like world coords (e.g. Picky at 63,123).
+      // 0x06 SPAWN — layout mirrored from superogira line 1442-1520:
+      //   [06][flag:1][?4][0x0F @6][id:u32 @7][sub:u32 @11][?4]
+      //   [z:i32 @19][nameLen:u32 @23][name UTF-8 @27...]
+      //   After name: EITHER
+      //     - nameLen path: kind = bytes[nameEnd]
+      //     - scan path (if UTF-8 truncated): [00 00][kind<=2] → kind = bytes[nameEnd+2]
+      //   Then: x:i32 @nameEnd+3, y:i32 @nameEnd+7, hp:u32 @+12, hpMax:u32 @+16
       if (bytes.length < 27) return { ...base, kind: 'unknown' };
-      const kindByte = bytes[1] ?? 0xff;
-      let actorKind: ActorKind = 'unknown';
-      if (kindByte === 0) actorKind = 'player';
-      else if (kindByte === 1) actorKind = 'monster';
-      else if (kindByte === 2) actorKind = 'npc';
       const actorId = u32le(bytes, 7);
+      const nameLen = u32le(bytes, 23);
 
-      // Name at offset 0x1c, length in u32 LE at 0x18 (best-guess from sample)
-      let name: string | undefined;
-      let posX: number | undefined;
-      let posY: number | undefined;
-      if (bytes.length >= 0x1c + 4) {
-        const nameLen = u32le(bytes, 0x18);
-        if (nameLen > 0 && nameLen < 32 && bytes.length >= 0x1c + nameLen + 11) {
-          name = new TextDecoder('utf-8', { fatal: false }).decode(
-            bytes.subarray(0x1c, 0x1c + nameLen),
-          );
-          const posOff = 0x1c + nameLen + 3;
-          posX = u32le(bytes, posOff);
-          posY = u32le(bytes, posOff + 4);
-          if (posX > 500 || posY > 500) {
-            posX = undefined;
-            posY = undefined;
+      let nameEnd = -1;
+      let kind = -1;
+      let scanPath = false;
+
+      // Try nameLen path first
+      if (nameLen > 0 && nameLen < 32 && bytes.length >= 27 + nameLen + 3) {
+        const lastByte = bytes[27 + nameLen - 1] ?? 0;
+        const looksTruncated = lastByte >= 0x80; // UTF-8 continuation
+        if (!looksTruncated) {
+          nameEnd = 27 + nameLen;
+          const k = bytes[nameEnd] ?? 0xff;
+          if (k <= 2) kind = k;
+          else {
+            // nameLen was misleading; fall through to scan
+            nameEnd = -1;
           }
         }
       }
-      if (!name) name = scanAscii(bytes.subarray(26));
-      const at = posX !== undefined && posY !== undefined ? { x: posX, y: posY } : undefined;
+
+      // Fallback: scan for [00 00][kind<=2]
+      if (nameEnd < 0) {
+        for (let i = 27; i < bytes.length - 2; i++) {
+          if (bytes[i] === 0 && bytes[i + 1] === 0 && (bytes[i + 2] ?? 0xff) <= 2) {
+            nameEnd = i;
+            kind = bytes[i + 2]!;
+            scanPath = true;
+            break;
+          }
+        }
+      }
+      if (nameEnd < 0 || kind < 0) return { ...base, kind: 'unknown' };
+
+      const name = new TextDecoder('utf-8', { fatal: false }).decode(bytes.subarray(27, nameEnd));
+
+      let actorKind: ActorKind = 'unknown';
+      if (kind === 0) actorKind = 'player';
+      else if (kind === 1) actorKind = 'monster';
+      else if (kind === 2) actorKind = 'npc';
+
+      // Coord/HP offsets are relative to nameEnd; scan path uses nameEnd (with kind@+2)
+      // but data offset is same: nameLen path data starts at nameEnd+1 (kind is 1 byte)
+      // scan path data starts at nameEnd+3 ([00 00][kind])
+      // superogira uses nameEnd+3 uniformly: for nameLen path, this means it skips
+      // 2 bytes that happen to be 0 padding after kind. Empirically that works.
+      const dataOff = scanPath ? nameEnd + 3 : nameEnd + 3;
+      let at: { x: number; y: number } | undefined;
+      if (bytes.length >= dataOff + 8) {
+        const x = i32le(bytes, dataOff);
+        const y = i32le(bytes, dataOff + 4);
+        if (validCoord(x, y)) at = { x, y };
+      }
       return { ...base, kind: 'spawn' as const, actorId, actorKind, name, at };
     }
 
     case 0x07: {
-      // MOVE_UPDATE: [07][id:u32][x:i16][y:i16]...
+      // 0x07 MOVE_UPDATE — [07][id:u32][x:i16][y:i16]... (superogira line 940)
       if (bytes.length < 9) return { ...base, kind: 'unknown' };
       const actorId = u32le(bytes, 1);
       const x = i16le(bytes, 5);
       const y = i16le(bytes, 7);
+      if (!validCoord(x, y)) return { ...base, kind: 'unknown' };
       return { ...base, kind: 'move', actorId, to: { x, y } };
     }
 
@@ -127,11 +163,12 @@ export function decodeFrame(bytes: Uint8Array, ts: number): PacketEvent {
     }
 
     case 0x14: {
-      // ENTITY_POS: [14][id:u32][x:i16][y:i16][flag:1]
+      // 0x14 ENTITY_POS — [14][id:u32][x:i16][y:i16][flag:1] (superogira line 1584)
       if (bytes.length < 10) return { ...base, kind: 'unknown' };
       const actorId = u32le(bytes, 1);
       const x = i16le(bytes, 5);
       const y = i16le(bytes, 7);
+      if (!validCoord(x, y)) return { ...base, kind: 'unknown' };
       return { ...base, kind: 'pos', actorId, at: { x, y } };
     }
 
@@ -204,17 +241,18 @@ export function decodeFrame(bytes: Uint8Array, ts: number): PacketEvent {
     }
 
     case 0x3c: {
-      // ENTITY_LIST or MINIMAP; batch layout guess: [3c][sub:1][count:u16][entry:9]*
-      // Only emit first entry (best-effort). Full batch handled via decodeAll().
-      if (bytes.length < 4) return { ...base, kind: 'unknown' };
-      const count = u16le(bytes, 2);
-      const entrySize = 9;
-      const headerSize = 4;
-      if (count > 0 && count < 200 && bytes.length >= headerSize + entrySize) {
-        const id = u32le(bytes, headerSize);
-        const x = i16le(bytes, headerSize + 4);
-        const y = i16le(bytes, headerSize + 6);
-        return { ...base, kind: 'pos', actorId: id, at: { x, y } };
+      // 0x3c MINIMAP_MARKER — dual mode (superogira line 1257):
+      //   sub=1: single entity [3c][01 00][id:u32 @3][x:i16 @7][y:i16 @9][flag @11] (12B)
+      //   sub=7/13: multi-entity list; entries start at offset 3, 9B each
+      //     [id:u32][x:i16][y:i16][flag:u8]
+      // decodeAll() expands multi to N events.
+      if (bytes.length < 12) return { ...base, kind: 'unknown' };
+      const sub = u16le(bytes, 1);
+      if (sub === 1) {
+        const id = u32le(bytes, 3);
+        const x = i16le(bytes, 7);
+        const y = i16le(bytes, 9);
+        if (validCoord(x, y)) return { ...base, kind: 'pos', actorId: id, at: { x, y } };
       }
       return { ...base, kind: 'unknown' };
     }
@@ -249,25 +287,28 @@ export function decodeFrame(bytes: Uint8Array, ts: number): PacketEvent {
 }
 
 /**
- * Like decodeFrame but expands batch packets (0x3c entity list) into
- * multiple events, one per entity entry.
+ * decodeAll expands multi-entity packets:
+ *   0x3c sub=7 or sub=13 → N pos events (initial map dump after warp)
+ * Everything else = single event from decodeFrame.
  */
 export function decodeAll(bytes: Uint8Array, ts: number): PacketEvent[] {
   const op = bytes[0] ?? 0;
-  if (op === 0x3c && bytes.length >= 4) {
-    const count = u16le(bytes, 2);
-    const entrySize = 9;
-    const headerSize = 4;
-    if (count > 0 && count < 200 && bytes.length >= headerSize + count * entrySize) {
+  if (op === 0x3c && bytes.length >= 5) {
+    const sub = u16le(bytes, 1);
+    if (sub === 7 || sub === 13 || sub === 4) {
       const out: PacketEvent[] = [];
-      for (let i = 0; i < count; i++) {
-        const off = headerSize + i * entrySize;
-        const id = u32le(bytes, off);
-        const x = i16le(bytes, off + 4);
-        const y = i16le(bytes, off + 6);
-        out.push({ op, ts, raw: bytes, kind: 'pos', actorId: id, at: { x, y } });
+      let p = 3;
+      while (p + 9 <= bytes.length) {
+        const id = u32le(bytes, p);
+        const x = i16le(bytes, p + 4);
+        const y = i16le(bytes, p + 6);
+        // const flag = bytes[p + 8]; — could be used to set kind
+        p += 9;
+        if (id && validCoord(x, y)) {
+          out.push({ op, ts, raw: bytes, kind: 'pos', actorId: id, at: { x, y } });
+        }
       }
-      return out;
+      if (out.length > 0) return out;
     }
   }
   return [decodeFrame(bytes, ts)];
