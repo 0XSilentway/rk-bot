@@ -47,6 +47,64 @@ Char: `Silentway_28` (Thief lvl 18) on map `iz_dun00`. Actions: stand → walk �
 3. **Entity id layout.** `0B20` len=34 spawn packet — bytes 3-6 are almost certainly a uint32 entity id. Correlate with `3C01` middle bytes.
 4. **Opcode endianness / length convention.** Move opcode looks like a **1-byte** op (`0x07`), while login is `08 00` (looks like 2-byte). May actually be: all packets have 1-byte op, and multi-byte op is really `op + subcmd`.
 
+## Session F (Test F — attack + skill combo) — 2026-08-15
+
+Char: Mage lvl 21 SP 195/195, target Peco Peco Egg lvl 10. Actions: attack Peco Egg (physical, 2 dmg each), then Fire Bolt (skill 0x080C = 2060), pickup dropped items.
+
+**RESULT — 10+ opcodes decoded. Full damage/exp/drop pipeline mapped.**
+
+### Send opcodes confirmed
+
+| Opcode | Layout | Meaning | Sample |
+|--------|--------|---------|--------|
+| `0B` | `0B <target:u32 LE>` = 5B | **ATTACK** | `0B 8F 1A 00 00` → attack entity 0x1A8F |
+| `1D` | `1D 01 <target:u32> <skill:u16 LE>` = 8B | **SKILL CAST** | `1D 01 8F1A0000 0C08` → skill 2060 on 0x1A8F |
+| `52` | `52 <drop_id:u32 LE>` = 5B | **PICKUP** | `52 9D 59 00 00` → pickup drop 0x599D |
+
+### Recv opcodes confirmed
+
+| Opcode | Layout | Meaning | Notes |
+|--------|--------|---------|-------|
+| `17` | `17 <target:u32> <damage:u32> 2F 00 91 00 <flag:u8>` = 14B | **DAMAGE** | dmg=2 matches "2" hitmark on screen. `2F 00 91 00` seems fixed (maybe attacker id or hit-type). |
+| `22` | `22 <base_total:u32> <base_gained:u32> <job_total:u32> <job_gained:u32>` = 17B | **EXP GAIN** | base 649→681 (+32), job 954→982 (+28) exactly matches char screen |
+| `26` | `26 <actor:u32> ...` = 9B | Actor tick (HP-related?) | all 3 samples identical, needs isolation |
+| `27` | `27 <sp_cur:u32 LE> <sp_max:u32 LE>` = 9B | **SP UPDATE** | Values A9/B9/C3 = 169/185/195, max C3 = 195 matches char screen |
+| `06` len=90 | `06 ...` includes ASCII mob name | **MOB SPAWN** | Contains `Picky` in plain text |
+| `1D` len=36 | `1D 01 <src> FFFFFFFF <target> <skill:u16> <?> <dmg:u32> ...` | **SKILL RESULT** | dmg=77 (0x4D) at offset ~21 |
+| `18` len=21 | ? | Pre-skill echo? | Fired just before 1D result |
+| `51` len=21 | `51 <drop_id:u32> <x:f32> <y:f32> <item:u16> <amt:u16> ...` | **ITEM DROP** | Coords are **float32 LE** here, unlike int16 in move packet |
+| `52` len=9 | `52 <drop_id:u32> <actor:u32>` | **PICKUP CONFIRM** | Broadcast to all players in range |
+| `0B` len=34 x77 | ? | Combat/mob-state broadcast | Dominates during fight — every hit generates one |
+| `0F` len=10 | `0F <actor:u32> <?:u16> 80 BF` | Actor tick | `80 BF` = float -1.0 (0xBF800000) — direction? |
+| `3C` | as before | Position tick | Confirmed generic entity tick |
+
+### Big picture
+
+Combat loop for the bot will be:
+```
+1. Parse 0x06 spawn packets → build mob list (name, id, pos)
+2. Send 0x0B <target_id> to auto-attack (or 0x1D for skill)
+3. Watch 0x17 damage packets to track kill progress
+4. On 0x22 exp gain → mob dead; scan for 0x51 drop packets
+5. Send 0x52 <drop_id> to loot
+```
+
+### Character self-id
+
+- Own actor id observed: `64 C6 0E 00` = **0x000EC664** (appears as `src` in 1D skill, as actor in 26/0F ticks)
+
+### Skill ID mapping
+
+- `0x080C` = 2060 = **Fire Bolt** (or whichever bolt user cast). Vanilla RO Fire Bolt = 14 (0x0E). Rebuild-Ragnarok reindexes skill IDs.
+
+### Coord encoding inconsistency
+
+- Move (client → server): `int16 LE x,y`
+- Drop packet (server → client): `float32 LE x,y`
+- Position tick 0x3C: unclear yet
+
+Bot needs both codecs.
+
 ## Session 2026-08-15T03-46-49 (Test B — move obfuscation)
 
 Char: same. Action: stand 15s → click A x3 → click B x2 → refresh + login → click A' x1 → close.
