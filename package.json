@@ -6,7 +6,7 @@
   "scripts": {
     "start": "bun run src/index.ts",
     "dev": "bun --watch run src/index.ts",
-    "dump": "bun run src/tools/dump-captures.ts",
+    "inspect": "bun run src/tools/inspect.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

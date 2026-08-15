@@ -1,6 +1,7 @@
 node_modules/
 bun.lockb
-captures/*.db
+captures/session-2*.db
+captures/session-2*.db-*
 captures/*.jsonl
 *.log
 .DS_Store
