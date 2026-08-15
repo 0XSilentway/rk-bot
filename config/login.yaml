@@ -16,7 +16,7 @@
 # Set enabled: false to disable and login manually.
 # ================================================================
 
-enabled: true
+enabled: false     # disabled — packet replay does not work; game WS only opens after Login click
 delay_ms: 800          # wait after ws-open before first packet
 gap_ms: 200            # delay between packets
 

@@ -24,7 +24,7 @@ export function startDashboard(world: WorldState, intervalMs = 1000): void {
     lastKey = key;
 
     const hints: string[] = [];
-    if (s.id === undefined) hints.push('[HINT] no self id — attack a mob once');
+    if (s.id === undefined) hints.push('[HINT] no self id — click Login in the game window first');
     else if (!s.pos) hints.push('[HINT] no self pos — click to move 1 step');
     const withPos = mobs.filter(m => m.pos).length;
     if (mobs.length > 0 && withPos === 0) {
