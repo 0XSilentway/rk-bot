@@ -5,6 +5,7 @@ import { WorldState } from '../state/world';
 import { startDashboard } from '../state/dashboard';
 import { startBrain, pauseBrain, resumeBrain } from '../bot/brain';
 import { startMonitor } from '../monitor/server';
+import { tryAutoLogin, watchLogin } from '../bot/auto-login';
 import type { ServerWebSocket } from 'bun';
 
 type FrameKind = 'text' | 'binary' | 'blob-pending' | 'unknown';
@@ -47,6 +48,7 @@ export function startRelay(opts: RelayOpts) {
   };
 
   startDashboard(world);
+  watchLogin();
   const brain = startBrain(world, send);
 
   // Web dashboard on port +1
@@ -81,9 +83,7 @@ export function startRelay(opts: RelayOpts) {
           return;
         }
         seq++;
-        handle(log, world, seq, msg, (id) => {
-          activeWsId = id;
-        });
+        handle(log, world, seq, msg, (id) => { activeWsId = id; }, send);
       },
     },
   });
@@ -136,6 +136,7 @@ function handle(
   seq: number,
   msg: WireMessage,
   setActiveWs: (id: number) => void,
+  send: (bytes: Uint8Array) => void,
 ): void {
   switch (msg.t) {
     case 'hello':
@@ -146,6 +147,9 @@ function handle(
       console.log(`[relay] ws#${msg.id} open ${msg.url}`);
       log.event(seq, msg.ts, 'open', JSON.stringify({ id: msg.id, url: msg.url }));
       if (typeof msg.id === 'number') setActiveWs(msg.id);
+      // fire auto-login (async — doesn't block relay). ws must be set as active first.
+      if (typeof msg.id === 'number') setActiveWs(msg.id);
+      tryAutoLogin(msg.url, send).catch(e => console.warn('[login] failed', e));
       return;
     case 'ws-close':
       console.log(`[relay] ws#${msg.id} close code=${msg.code}`);

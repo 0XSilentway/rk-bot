@@ -1,0 +1,30 @@
+# ================================================================
+# rk-bot auto-login
+# ================================================================
+# When the injector opens a WebSocket to the game server, these
+# packets are replayed in order (with delay_ms initial pause,
+# then gap_ms between each). Captured from a successful manual
+# login on 2026-08-15.
+#
+# Bytes contain plain-text credentials: username + character name.
+# If you change account, capture new packets:
+#   1. pause bot, verbose on
+#   2. refresh browser + login manually
+#   3. copy the first two [send] frames — 0x08 (30B) and 0x03 (79B)
+#   4. paste hex here
+#
+# Set enabled: false to disable and login manually.
+# ================================================================
+
+enabled: true
+delay_ms: 800          # wait after ws-open before first packet
+gap_ms: 200            # delay between packets
+
+# Only trigger for URLs matching this substring
+url_match: rayrag
+
+packets:
+  # 0x08 char/login: user 'silentway28' + char 'Silentway_28'
+  - "08000000000b73696c656e7477617932380c53696c656e747761795f3238"
+  # 0x03 auth blob
+  - "039600c07305c1712bc17301c17137c1730fc17133c17109c1714fc17165c17145c17303c1714bc17313c1714fc17145c17163c1710fc17301c1714bc17311c17133c17303c17147c1716bc1710901"
