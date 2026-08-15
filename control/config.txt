@@ -1,0 +1,64 @@
+# ================================================================
+# rk-bot main config
+# ================================================================
+# Format: <key> <value>
+# Lines starting with # are comments.
+# Save the file — the bot hot-reloads automatically.
+# ================================================================
+
+######## General ########
+# 0 = bot paused,  1 = bot running
+enabled 1
+
+# AI loop poll interval (ms)
+tickMs 500
+
+
+######## Combat ########
+# Cast range in tiles (Bolt spells = 9)
+attackDistance 9
+
+# Stop-short (walk to attackDistance - approachStopShort)
+attackApproachStopShort 2
+
+# Min ms between move commands (throttle path spam)
+attackMoveDebounce 400
+
+# Min ms between skill casts (bolt cast time + safety)
+attackCastDebounce 2500
+
+
+######## Emergency wing ########
+# Fly Wing item ID (RayRag = 601)
+flyWingItemID 601
+
+# Wing when own HP % drops below this (safety net)
+teleportOnHPPct 30
+
+# Min ms between two wings (item cooldown)
+wingCooldownMs 4000
+
+# Sight range for teleport=2 rules (tiles)
+teleportSightRange 12
+
+
+######## Loot ########
+# 1 = pick up every drop within range, 0 = pick nothing
+lootAll 1
+
+# Max age of a drop before we forget it (ms)
+lootMaxAgeMs 30000
+
+# Max range to pick up a drop (tiles)
+lootRange 12
+
+
+######## Roam ########
+# 0 = stand still when no target, 1 = wander to random tile nearby
+roamAuto 0
+
+# Idle time before roaming (ms)
+roamIdleMs 4000
+
+# Random walk radius from current pos (tiles)
+roamRadius 15

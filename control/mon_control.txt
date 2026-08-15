@@ -1,0 +1,44 @@
+# ================================================================
+# rk-bot mon_control
+# ================================================================
+#
+# Format:  <monster>  <attack>  <teleport>  <skill>  <level>
+#
+# <attack>
+#   -1  ignore even if this mob attacks us
+#    0  leave alone unless it attacks us first (defensive)
+#    1  always auto-attack this mob on sight
+#
+# <teleport>
+#    0  never wing because of this mob
+#    1  wing when this mob attacks us (fires on 0x0B, before HP drops)
+#    2  wing when this mob is within teleportSightRange tiles
+#
+# <skill>   skill id to cast on this mob   (RayRag: 11 = Fire Bolt, 12 = Cold Bolt)
+# <level>   skill level to cast            (must match your learned level)
+#
+# Multi-word names supported: everything before the last 4 numbers is the name.
+# 'all' sets the default for mobs not listed below.
+# Case-insensitive. Lines starting with # are comments.
+# ================================================================
+
+##### Default (unlisted mobs) #####
+all                     0  0    0   0
+
+
+##### moc_fld17 farm targets #####
+Hode                    1  0   11  10
+Steel Chonchon          1  1   11  10
+Deniro                  1  1   11   6
+Piere                   1  1   11   6
+
+
+##### moc_fld17 leave-alone #####
+Frilldora               0  0    0   0
+Ant Egg                 0  0    0   0
+
+
+##### Wing-on-sight examples (uncomment to enable) #####
+# Sandman               0  2    0   0
+# Osiris                0  2    0   0
+# Ghostring             0  2    0   0

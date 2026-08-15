@@ -1,48 +1,78 @@
-import { parse } from 'yaml';
 import { readFileSync, watch } from 'node:fs';
 import { join } from 'node:path';
 
-export interface SkillRule {
-  match: string[];
-  skill: { id: number; level: number };
-}
-
+/**
+ * OpenKore-style flat key-value file (control/config.txt).
+ * Every non-comment line is: `<key>  <value>` with any whitespace.
+ */
 export interface BotConfig {
   enabled: boolean;
-  tick_ms: number;
-  skills: SkillRule[];
-  combat: {
-    cast_range_cells: number;
-    approach_stop_short: number;
-    move_debounce_ms: number;
-    cast_debounce_ms: number;
-  };
-  emergency: {
-    fly_wing_item_id: number;
-    hp_pct_threshold: number;
-    wing_cooldown_ms: number;
-  };
-  loot: {
-    default: 'pickup' | 'skip';
-    range_cells: number;
-    max_age_ms: number;
-  };
-  roam: {
-    enabled: boolean;
-    idle_ms: number;
-    radius_tiles: number;
-  };
+  tickMs: number;
+  attackDistance: number;
+  attackApproachStopShort: number;
+  attackMoveDebounce: number;
+  attackCastDebounce: number;
+  flyWingItemID: number;
+  teleportOnHPPct: number;
+  wingCooldownMs: number;
+  teleportSightRange: number;
+  lootAll: boolean;
+  lootMaxAgeMs: number;
+  lootRange: number;
+  roamAuto: boolean;
+  roamIdleMs: number;
+  roamRadius: number;
 }
 
-const CONFIG_PATH = join(import.meta.dir, '..', '..', 'config', 'bot.yaml');
+const FILE = join(import.meta.dir, '..', '..', 'control', 'config.txt');
 
-let current: BotConfig;
+let current: BotConfig | undefined;
 const listeners: Array<(c: BotConfig) => void> = [];
 
+function parseTxt(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/#.*$/, '').trim();
+    if (!line) continue;
+    const m = line.match(/^(\S+)\s+(.+)$/);
+    if (!m) continue;
+    out[m[1]!] = m[2]!.trim();
+  }
+  return out;
+}
+
+function toBool(v: string | undefined, def: boolean): boolean {
+  if (v === undefined) return def;
+  const s = v.toLowerCase();
+  return s === '1' || s === 'true' || s === 'yes' || s === 'on';
+}
+function toNum(v: string | undefined, def: number): number {
+  if (v === undefined) return def;
+  const n = Number(v);
+  return isFinite(n) ? n : def;
+}
+
 function loadOnce(): BotConfig {
-  const text = readFileSync(CONFIG_PATH, 'utf-8');
-  const parsed = parse(text) as BotConfig;
-  return parsed;
+  const raw = readFileSync(FILE, 'utf-8');
+  const kv = parseTxt(raw);
+  return {
+    enabled: toBool(kv.enabled, true),
+    tickMs: toNum(kv.tickMs, 500),
+    attackDistance: toNum(kv.attackDistance, 9),
+    attackApproachStopShort: toNum(kv.attackApproachStopShort, 2),
+    attackMoveDebounce: toNum(kv.attackMoveDebounce, 400),
+    attackCastDebounce: toNum(kv.attackCastDebounce, 2500),
+    flyWingItemID: toNum(kv.flyWingItemID, 601),
+    teleportOnHPPct: toNum(kv.teleportOnHPPct, 30),
+    wingCooldownMs: toNum(kv.wingCooldownMs, 4000),
+    teleportSightRange: toNum(kv.teleportSightRange, 12),
+    lootAll: toBool(kv.lootAll, true),
+    lootMaxAgeMs: toNum(kv.lootMaxAgeMs, 30000),
+    lootRange: toNum(kv.lootRange, 12),
+    roamAuto: toBool(kv.roamAuto, false),
+    roamIdleMs: toNum(kv.roamIdleMs, 4000),
+    roamRadius: toNum(kv.roamRadius, 15),
+  };
 }
 
 export function loadConfig(): BotConfig {
@@ -56,14 +86,13 @@ export function onConfigChange(cb: (c: BotConfig) => void): void {
 
 export function watchConfig(): void {
   let debounce: ReturnType<typeof setTimeout> | undefined;
-  watch(CONFIG_PATH, () => {
+  watch(FILE, () => {
     if (debounce) clearTimeout(debounce);
     debounce = setTimeout(() => {
       try {
-        const fresh = loadOnce();
-        current = fresh;
-        console.log('[config] reloaded ' + CONFIG_PATH);
-        for (const cb of listeners) cb(fresh);
+        current = loadOnce();
+        console.log('[config] reloaded ' + FILE);
+        for (const cb of listeners) cb(current);
       } catch (e) {
         console.warn('[config] reload failed:', (e as Error).message);
       }

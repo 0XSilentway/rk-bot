@@ -2,7 +2,7 @@ import { parse } from 'yaml';
 import { readFileSync, existsSync, watch } from 'node:fs';
 import { join } from 'node:path';
 
-const FILE = join(import.meta.dir, '..', '..', 'config', 'login.yaml');
+const FILE = join(import.meta.dir, '..', '..', 'control', 'login.yaml');
 
 export interface LoginConfig {
   enabled: boolean;

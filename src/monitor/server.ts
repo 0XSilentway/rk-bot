@@ -11,8 +11,8 @@ interface BrainControl {
 }
 
 const STATIC = join(import.meta.dir, 'static');
-const CONFIG_DIR = join(import.meta.dir, '..', '..', 'config');
-const ALLOWED_CONFIG_FILES = new Set(['bot.yaml', 'mon_control.yaml']);
+const CONFIG_DIR = join(import.meta.dir, '..', '..', 'control');
+const ALLOWED_CONFIG_FILES = new Set(['config.txt', 'mon_control.txt', 'login.yaml']);
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',

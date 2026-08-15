@@ -3,7 +3,7 @@
   const wsUrl = `ws://${location.host}/events`;
   let ws;
   let state = null;
-  let currentFile = 'bot.yaml';
+  let currentFile = 'config.txt';
   let editorDirty = false;
   const $log = document.getElementById('logView');
   const $editor = document.getElementById('configEditor');

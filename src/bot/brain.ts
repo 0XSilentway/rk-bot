@@ -1,6 +1,6 @@
 import type { WorldState } from '../state/world';
 import type { Actor, Drop } from '../state/actor';
-import { loadConfig, watchConfig, onConfigChange, type BotConfig, type SkillRule } from '../config/load';
+import { loadConfig, watchConfig, onConfigChange, type BotConfig } from '../config/load';
 import { loadMonControl, watchMonControl, onMonControlChange, ruleFor, type MonRule } from '../config/mon-control';
 import { buildMove, buildPickup, buildRespawn, buildSkillTarget, buildUseItem } from '../packet/encode';
 
@@ -36,12 +36,12 @@ export function startBrain(world: WorldState, send: Send): BrainState {
   loadMonControl();
   watchConfig();
   watchMonControl();
-  onConfigChange(c => console.log('[brain] bot.yaml reloaded — skills:', c.skills.length));
-  onMonControlChange(d => console.log('[brain] mon_control reloaded —', d.entries.size, 'rules'));
+  onConfigChange(() => console.log('[brain] config.txt reloaded'));
+  onMonControlChange((d) => console.log(`[brain] mon_control.txt reloaded — ${d.entries.size} rules`));
   s.paused = !cfg0.enabled;
 
-  setInterval(() => tick(world, send, s), cfg0.tick_ms);
-  console.log(`[brain] started (tick ${cfg0.tick_ms}ms) — enabled=${!s.paused}`);
+  setInterval(() => tick(world, send, s), cfg0.tickMs);
+  console.log(`[brain] started (tick ${cfg0.tickMs}ms) — enabled=${!s.paused}`);
   return s;
 }
 
@@ -49,20 +49,10 @@ function dist(a: { x: number; y: number }, b: { x: number; y: number }): number 
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
-function matchSkill(cfg: BotConfig, name: string | undefined): SkillRule | undefined {
-  if (!name) return undefined;
-  const lower = name.toLowerCase();
-  for (const rule of cfg.skills) {
-    for (const m of rule.match) {
-      if (m === '*' || lower.includes(m.toLowerCase())) return rule;
-    }
-  }
-  return undefined;
-}
-
 function tick(world: WorldState, send: Send, s: BrainState): void {
   if (s.paused) return;
   const cfg = loadConfig();
+  const mc = loadMonControl();
   const self = world.self;
   if (!self.id || !self.pos) return;
 
@@ -78,46 +68,41 @@ function tick(world: WorldState, send: Send, s: BrainState): void {
   }
 
   const now = Date.now();
-  const mc = loadMonControl();
 
-  // 2) Emergency wing — 3 triggers:
-  //    (a) HP below global threshold
-  //    (b) recently hit by mob with teleport=1
-  //    (c) mob with teleport=2 within teleport_range tiles
+  // 2) Emergency wing — 3 triggers (priority: hp > attacked > sight)
   const hpPct = self.hp && self.hpMax ? (self.hp / self.hpMax) * 100 : 100;
   let wingReason = '';
 
-  if (hpPct < cfg.emergency.hp_pct_threshold) {
+  if (hpPct < cfg.teleportOnHPPct) {
     wingReason = `HP=${hpPct.toFixed(0)}%`;
   } else if (world.lastHitBy && now - world.lastHitBy.ts < 1500) {
     const attacker = world.actors.get(world.lastHitBy.attackerId);
     const rule = ruleFor(mc, attacker?.name);
-    if (rule.teleport === 1) wingReason = `attacked by ${attacker?.name ?? 'unknown'} (t=1)`;
+    if (rule.teleport === 1) wingReason = `attacked by ${attacker?.name ?? '?'} (teleport=1)`;
   }
   if (!wingReason) {
-    // sight-wing (teleport=2)
     for (const m of world.actors.values()) {
       if (!m.alive || !m.pos || m.kind !== 'monster') continue;
       const rule = ruleFor(mc, m.name);
       if (rule.teleport !== 2) continue;
       const d = dist(self.pos, m.pos);
-      if (d <= mc.teleport_range) {
-        wingReason = `sighted ${m.name} @ ${d.toFixed(1)}t (t=2)`;
+      if (d <= cfg.teleportSightRange) {
+        wingReason = `sighted ${m.name} @ ${d.toFixed(1)}t (teleport=2)`;
         break;
       }
     }
   }
 
-  if (wingReason && now - s.lastWingTs >= cfg.emergency.wing_cooldown_ms) {
+  if (wingReason && now - s.lastWingTs >= cfg.wingCooldownMs) {
     console.log(`[brain] 🕊 FLY WING — ${wingReason}`);
-    send(buildUseItem(cfg.emergency.fly_wing_item_id));
+    send(buildUseItem(cfg.flyWingItemID));
     s.lastWingTs = now;
     s.lastActionTs = now;
     world.lastHitBy = undefined;
     return;
   }
 
-  // 3) Pickup any drop in range
+  // 3) Pickup
   const drop = pickupTarget(world, cfg, self.pos, s, now);
   if (drop) {
     const last = s.lastPickupTs.get(drop.dropId) ?? 0;
@@ -138,11 +123,11 @@ function tick(world: WorldState, send: Send, s: BrainState): void {
     return;
   }
 
-  // 4) Find target — only mobs whose policy is 'auto'
+  // 4) Target picking (uses mon_control per-mob rule)
   const picked = pickTarget(world, cfg, self.pos);
   if (!picked) {
-    if (cfg.roam.enabled && now - s.lastActionTs > cfg.roam.idle_ms && now - s.lastMoveTs > 2000) {
-      const r = cfg.roam.radius_tiles;
+    if (cfg.roamAuto && now - s.lastActionTs > cfg.roamIdleMs && now - s.lastMoveTs > 2000) {
+      const r = cfg.roamRadius;
       const rx = Math.round(self.pos.x + (Math.random() * 2 - 1) * r);
       const ry = Math.round(self.pos.y + (Math.random() * 2 - 1) * r);
       console.log(`[brain] roam → (${rx},${ry})`);
@@ -153,17 +138,17 @@ function tick(world: WorldState, send: Send, s: BrainState): void {
     }
     return;
   }
-  const { actor: target, skill } = picked;
+  const { actor: target, rule } = picked;
   if (!target.pos) return;
   const d = dist(self.pos, target.pos);
   const label = `${target.name ?? '?'}#${target.id.toString(16).slice(-4)}`;
 
   // 5) In range → cast (debounced)
-  if (d <= cfg.combat.cast_range_cells) {
-    if (now - s.lastCastTs >= cfg.combat.cast_debounce_ms) {
+  if (d <= cfg.attackDistance) {
+    if (now - s.lastCastTs >= cfg.attackCastDebounce) {
       const spBefore = self.sp;
-      console.log(`[brain] cast skill=${skill.id} lv=${skill.level} on ${label} d=${d.toFixed(1)} (SP=${spBefore ?? '?'})`);
-      send(buildSkillTarget(target.id, skill.id, skill.level));
+      console.log(`[brain] cast skill=${rule.skill} lv=${rule.level} on ${label} d=${d.toFixed(1)} (SP=${spBefore ?? '?'})`);
+      send(buildSkillTarget(target.id, rule.skill, rule.level));
       s.lastCastTs = now;
       s.lastCastTargetId = target.id;
       s.lastCastSpBefore = spBefore;
@@ -171,7 +156,7 @@ function tick(world: WorldState, send: Send, s: BrainState): void {
       setTimeout(() => {
         const spAfter = world.self.sp;
         const still = world.actors.get(target.id);
-        if (still && (!still.alive)) return;
+        if (still && !still.alive) return;
         if (spBefore !== undefined && spAfter !== undefined && spAfter >= spBefore) {
           console.log(`[brain] ⚠️ cast REJECTED (SP unchanged ${spBefore}→${spAfter})`);
         } else if (spBefore !== undefined && spAfter !== undefined) {
@@ -183,8 +168,8 @@ function tick(world: WorldState, send: Send, s: BrainState): void {
   }
 
   // 6) Move toward
-  if (now - s.lastMoveTs < cfg.combat.move_debounce_ms) return;
-  const step = stepToward(self.pos, target.pos, cfg.combat.cast_range_cells - cfg.combat.approach_stop_short);
+  if (now - s.lastMoveTs < cfg.attackMoveDebounce) return;
+  const step = stepToward(self.pos, target.pos, cfg.attackDistance - cfg.attackApproachStopShort);
   if (s.lastMoveTo && s.lastMoveTo.x === step.x && s.lastMoveTo.y === step.y && now - s.lastMoveTs < 3000) return;
   console.log(`[brain] move to (${step.x},${step.y}) toward ${label} (d=${d.toFixed(1)})`);
   send(buildMove(step.x, step.y));
@@ -195,35 +180,36 @@ function tick(world: WorldState, send: Send, s: BrainState): void {
 
 function pickTarget(
   world: WorldState,
-  cfg: BotConfig,
+  _cfg: BotConfig,
   selfPos: { x: number; y: number },
-): { actor: Actor; skill: { id: number; level: number } } | undefined {
+): { actor: Actor; rule: MonRule } | undefined {
   const mc = loadMonControl();
   let best: Actor | undefined;
-  let bestSkill: { id: number; level: number } | undefined;
+  let bestRule: MonRule | undefined;
   let bestD = Infinity;
   const selfId = world.self.id;
   for (const m of world.actors.values()) {
     if (m.id === selfId || !m.alive || !m.pos) continue;
     if (m.kind !== 'monster') continue;
-    const mr: MonRule = ruleFor(mc, m.name);
-    if (mr.attack === 0) continue;
-    // attack=2 (if_attacked) — require this mob has hit us recently
-    if (mr.attack === 2) {
+    const mr = ruleFor(mc, m.name);
+    // attack==1: always
+    // attack==0: only if this mob has hit us recently (defensive)
+    // attack==-1: never
+    if (mr.attack === -1) continue;
+    if (mr.attack === 0) {
       const hit = world.lastHitBy;
       if (!hit || hit.attackerId !== m.id || Date.now() - hit.ts > 5000) continue;
     }
-    const skillRule = matchSkill(cfg, m.name);
-    if (!skillRule) continue;
+    if (!mr.skill) continue; // no skill assigned → can't attack
     const d = dist(selfPos, m.pos);
     if (d < bestD) {
       bestD = d;
       best = m;
-      bestSkill = skillRule.skill;
+      bestRule = mr;
     }
   }
-  if (!best || !bestSkill) return undefined;
-  return { actor: best, skill: bestSkill };
+  if (!best || !bestRule) return undefined;
+  return { actor: best, rule: bestRule };
 }
 
 function pickupTarget(
@@ -233,16 +219,16 @@ function pickupTarget(
   s: BrainState,
   now: number,
 ): Drop | undefined {
-  if (cfg.loot.default === 'skip') return undefined;
+  if (!cfg.lootAll) return undefined;
   let best: Drop | undefined;
   let bestD = Infinity;
   for (const d of world.drops.values()) {
     if (s.giveupDrops.has(d.dropId)) continue;
     const age = now - d.spawnedTs;
-    if (age > cfg.loot.max_age_ms) continue;
+    if (age > cfg.lootMaxAgeMs) continue;
     if (age < 500) continue;
     const dd = dist(selfPos, d.at);
-    if (dd > cfg.loot.range_cells) continue;
+    if (dd > cfg.lootRange) continue;
     if (dd < bestD) {
       bestD = dd;
       best = d;
@@ -267,11 +253,5 @@ function stepToward(
   };
 }
 
-export function pauseBrain(s: BrainState): void {
-  s.paused = true;
-  console.log('[brain] paused');
-}
-export function resumeBrain(s: BrainState): void {
-  s.paused = false;
-  console.log('[brain] resumed');
-}
+export function pauseBrain(s: BrainState): void { s.paused = true; console.log('[brain] paused'); }
+export function resumeBrain(s: BrainState): void { s.paused = false; console.log('[brain] resumed'); }
