@@ -42,10 +42,46 @@ Char: `Silentway_28` (Thief lvl 18) on map `iz_dun00`. Actions: stand → walk �
 
 ### Big unknowns for Phase 2
 
-1. **Are send opcodes obfuscated?** Isolate: log out, log back in, do **exactly one** move click. Compare byte 2. If it differs across sessions with the same coord target, obfuscation is confirmed. If it matches, byte 2 is a coord.
-2. **Coord encoding.** RO packs (x,y) into 3 bytes with direction nibble. Isolate: click move to grid (100,100), (101,100), (100,101) — compare bytes 3-5.
+1. ~~**Are send opcodes obfuscated?**~~ **RESOLVED in Session B.** No obfuscation. See below.
+2. ~~**Coord encoding.**~~ **RESOLVED in Session B.** Plain int16 LE for x and y.
 3. **Entity id layout.** `0B20` len=34 spawn packet — bytes 3-6 are almost certainly a uint32 entity id. Correlate with `3C01` middle bytes.
-4. **Opcode endianness convention.** Recv opcodes look like `LSB first` (0x3C01 → 0x013C). Send opcodes `0800` → 0x0008. Need to confirm consistency.
+4. **Opcode endianness / length convention.** Move opcode looks like a **1-byte** op (`0x07`), while login is `08 00` (looks like 2-byte). May actually be: all packets have 1-byte op, and multi-byte op is really `op + subcmd`.
+
+## Session 2026-08-15T03-46-49 (Test B — move obfuscation)
+
+Char: same. Action: stand 15s → click A x3 → click B x2 → refresh + login → click A' x1 → close.
+
+**RESULT — no obfuscation. Plain int16 LE coord.**
+
+### Evidence
+
+| seq | rel t | hex | decode |
+|-----|-------|-----|--------|
+| 24 | +21s | `07 3A 00 89 00` | move to (x=58, y=137) — click A #1 |
+| 28 | +27s | `07 3A 00 89 00` | move to (58, 137) — click A #2 (identical) |
+| 30 | +34s | `07 3A 00 89 00` | move to (58, 137) — click A #3 (identical) |
+| 32 | +39s | `07 35 00 89 00` | move to (53, 137) — click B #1 |
+| 37 | +47s | `07 35 00 89 00` | move to (53, 137) — click B #2 (identical) |
+| 65 | +64s (after reconnect) | `07 31 00 89 00` | move to (49, 137) — plain again, no key reset |
+
+### Decoded packet: CZ_REQUEST_MOVE
+
+```
+byte 0        1        2        3        4
+     +--------+-----------------+-----------------+
+     |  0x07  |  x  (int16 LE)  |  y  (int16 LE)  |
+     +--------+-----------------+-----------------+
+```
+
+Total length = 5 bytes. Confirmed by session A (all `07XX 00YY 00` frames) and session B.
+
+### Reverse-engineering implications
+
+- **Zero cryptography.** No XOR key exchange, no rolling counter, no packet obfuscation of any kind.
+- **Plain-text leaks:**
+  - Login opcode `08 00` payload contains raw ASCII `username\x0cCharname`
+  - Warp opcode `40 08` payload starts with ASCII map name
+- **Phase 4 (bot → server) will be trivial.** Compose bytes and forward via injector.
 
 ### Next recon plan (isolated tests)
 
