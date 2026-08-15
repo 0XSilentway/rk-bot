@@ -12,7 +12,15 @@ interface BrainControl {
 
 const STATIC = join(import.meta.dir, 'static');
 const CONFIG_DIR = join(import.meta.dir, '..', '..', 'control');
-const ALLOWED_CONFIG_FILES = new Set(['config.txt', 'mon_control.txt', 'login.yaml']);
+const ALLOWED_CONFIG_FILES = new Set([
+  'config.txt',
+  'mon_control.txt',
+  'pickupitems.txt',
+  'items_control.txt',
+  'avoid.txt',
+  'shop.txt',
+  'login.yaml',
+]);
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',

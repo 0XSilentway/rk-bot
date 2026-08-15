@@ -1,0 +1,29 @@
+# ================================================================
+# rk-bot avoid.txt
+# ================================================================
+# Auto-teleport / auto-disconnect when hostile players are sighted.
+#
+# Three sections. Each row has these columns:
+#   [Players] and [Jobs]:  <key>  <disconnect_on_sight>  <teleport_on_sight>  <disconnect_on_chat>
+#   [ID]:                  <account_id>  <disconnect_on_sight>  <teleport_on_sight>
+#
+# Flags: 0 or 1. disconnect_on_chat = kill session if they PM us.
+# Section headers are case-sensitive. Lines starting with # are comments.
+# Names are case-insensitive; substring match against sighted player name.
+# ================================================================
+
+[Players]
+# Example: teleport on sight of any GM, disconnect if they PM us
+# [GM]           0  1  1
+# GameMaster     0  1  1
+# Server Admin   1  0  1
+
+[ID]
+# Format: <account_id>  <disconnect>  <teleport>
+# 12345678  1  0
+
+[Jobs]
+# Common bot-hunter classes. Teleport on sight = safer.
+# Priest     0  1  0
+# High Priest 0 1  0
+# Hunter     0  1  0

@@ -2,6 +2,10 @@ import type { WorldState } from '../state/world';
 import type { Actor, Drop } from '../state/actor';
 import { loadConfig, watchConfig, onConfigChange, type BotConfig } from '../config/load';
 import { loadMonControl, watchMonControl, onMonControlChange, ruleFor, type MonRule } from '../config/mon-control';
+import { loadPickup, watchPickup, pickupFlagFor } from '../config/pickupitems';
+import { loadAvoid, watchAvoid, avoidRuleFor } from '../config/avoid';
+import { loadItemsControl, watchItemsControl } from '../config/items-control';
+import { loadShop, watchShop } from '../config/shop';
 import { buildMove, buildPickup, buildRespawn, buildSkillTarget, buildUseItem } from '../packet/encode';
 
 type Send = (bytes: Uint8Array) => void;
@@ -34,8 +38,16 @@ export function startBrain(world: WorldState, send: Send): BrainState {
 
   const cfg0 = loadConfig();
   loadMonControl();
+  loadPickup();
+  loadAvoid();
+  loadItemsControl();
+  loadShop();
   watchConfig();
   watchMonControl();
+  watchPickup();
+  watchAvoid();
+  watchItemsControl();
+  watchShop();
   onConfigChange(() => console.log('[brain] config.txt reloaded'));
   onMonControlChange((d) => console.log(`[brain] mon_control.txt reloaded — ${d.entries.size} rules`));
   s.paused = !cfg0.enabled;
@@ -68,6 +80,22 @@ function tick(world: WorldState, send: Send, s: BrainState): void {
   }
 
   const now = Date.now();
+
+  // 1b) avoid.txt — any sighted player matches → wing (highest priority)
+  const av = loadAvoid();
+  if (av.players.size > 0 || av.ids.size > 0) {
+    for (const a of world.actors.values()) {
+      if (a.kind !== 'player' || !a.alive || a.id === self.id) continue;
+      const rule = avoidRuleFor(av, a.name, a.id);
+      if (rule?.teleport && now - s.lastWingTs >= cfg.wingCooldownMs) {
+        console.log(`[avoid] 🕊 wing — player ${a.name ?? a.id.toString(16)} sighted`);
+        send(buildUseItem(cfg.flyWingItemID));
+        s.lastWingTs = now;
+        s.lastActionTs = now;
+        return;
+      }
+    }
+  }
 
   // 2) Emergency wing — 3 triggers (priority: hp > attacked > sight)
   const hpPct = self.hp && self.hpMax ? (self.hp / self.hpMax) * 100 : 100;
@@ -220,8 +248,10 @@ function pickupTarget(
   now: number,
 ): Drop | undefined {
   if (!cfg.lootAll) return undefined;
+  const pickup = loadPickup();
   let best: Drop | undefined;
   let bestD = Infinity;
+  let bestFlag = -Infinity;
   for (const d of world.drops.values()) {
     if (s.giveupDrops.has(d.dropId)) continue;
     const age = now - d.spawnedTs;
@@ -229,7 +259,11 @@ function pickupTarget(
     if (age < 500) continue;
     const dd = dist(selfPos, d.at);
     if (dd > cfg.lootRange) continue;
-    if (dd < bestD) {
+    const flag = pickupFlagFor(pickup, d.itemId /* itemName TBD from item DB */);
+    if (flag === 0 || flag === -1) continue;   // skip / dropInv
+    // rush (flag=2) beats normal (flag=1); within same flag, nearest wins
+    if (flag > bestFlag || (flag === bestFlag && dd < bestD)) {
+      bestFlag = flag;
       bestD = dd;
       best = d;
     }

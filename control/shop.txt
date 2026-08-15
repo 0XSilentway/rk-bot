@@ -1,0 +1,30 @@
+# ================================================================
+# rk-bot shop.txt — vending stall
+# ================================================================
+# First line = shop title(s). Multiple titles separated by ;; are
+# rotated randomly each time the stall opens.
+#
+# Each item row:  <name>  <price>[..<max_price>]  [amount]
+#   - price supports commas: 3,500
+#   - price range price..maxprice picks random each open
+#   - amount omitted → sell all in inventory
+# ================================================================
+#
+# ⚠  Behavior WIP: parser lives; actual vending packets on this
+#     server not yet reverse-engineered. Once opcodes captured,
+#     executor reads this file — no code changes here.
+# ================================================================
+
+My Shop;;Cheap Stuff;;Great Deals;;Random Junk
+
+##### Rare drops #####
+"Old Blue Box"     3,500..4,500
+"Old Card Album"   15,000..20,000
+
+##### Bulk crafting mats #####
+Jellopy            50            20
+Fluff              80            30
+Honey              1,000..1,500
+
+##### Cards (all) #####
+"Andre Card"       200,000       5

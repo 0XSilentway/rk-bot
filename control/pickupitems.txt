@@ -1,0 +1,32 @@
+# ================================================================
+# rk-bot pickupitems
+# ================================================================
+# Per-item loot filter. Matched against item name OR numeric id.
+#
+# Format:  <name or id>   <flag>
+#
+# <flag>
+#    -1  drop from inventory to floor (auto-steal, rarely used)
+#     0  never pick up
+#     1  pick up (default when 'all 1')
+#     2  RUSH pickup — top priority, drop other tasks
+#
+# 'all <flag>' sets the default for items not listed.
+# Names are case-insensitive; numeric ids match exactly.
+# Quotes optional; multi-word names supported (last token = flag).
+# ================================================================
+
+##### Default #####
+all             1
+
+##### Rushed (drop combat to grab) #####
+"Old Blue Box"  2
+"Old Card Album" 2
+
+##### Trash — skip #####
+Jellopy         0
+Fluff           0
+Feather         0
+Sticky Mucus    0
+Green Herb      0
+Cactus Needle   0
