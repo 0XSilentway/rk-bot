@@ -5,7 +5,26 @@ OpenKore-inspired bot for `websea01.rayrag.com` (Unity WebGL Ragnarok Online).
 - **Browser side**: `injector/rk-bot.user.js` — Tampermonkey script that hooks `WebSocket` and pipes every frame to a local relay. Nothing more.
 - **Bot side**: Bun + TypeScript. Task-queue AI, config-driven behaviors, packet-level control.
 
-See `docs/ROADMAP.md` for the 10-phase plan. Currently: **Phase 1 (observe only)**.
+See `docs/ROADMAP.md` for the 10-phase plan. Currently: **Phase 3+4 (world state + inject + basic brain)**.
+
+## Bot behavior (MVP)
+
+Edit `src/bot/config.ts` to tune. Defaults:
+- Attacks mobs with names matching: `peco`, `egg`, `muka`, `ant`
+- Peco/Egg → skill 15 lv 8 (Frost Bolt guess)
+- Muka/Ant → skill 12 lv 6 (Fire Bolt — confirmed from Session F)
+- Walks toward mob, casts at ≤ 9 tiles, stops short by 2
+- Debounced: 400ms between moves, 2500ms between casts
+- Ignores everything else. Picks up drops within 12 tiles.
+- If HP < 30% → disengages (does not heal — user request)
+- On death → sends respawn packet
+
+## Runtime CLI
+
+While relay is running, type in the terminal:
+- `pause` — stop bot brain (recon-only)
+- `resume` — restart brain
+- `stat` — dump world state snapshot
 
 ## Quick start (Phase 1 recon)
 
