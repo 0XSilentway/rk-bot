@@ -8,6 +8,7 @@
     "dev": "bun --watch run src/index.ts",
     "inspect": "bun run src/tools/inspect.ts",
     "replay": "bun run src/tools/replay.ts",
+    "skills": "bun run src/tools/skills.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
