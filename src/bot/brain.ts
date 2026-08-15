@@ -253,19 +253,14 @@ function pickTarget(
   const mc = loadMonControl();
   const selfId = world.self.id;
 
-  // Stick with current target if still valid — avoids flip-flopping when a
-  // closer mob wanders in mid-fight.
+  // Stick with current target until it DIES or is removed from the world.
+  // Distance doesn't matter — bot will walk toward it however far.
   if (s.lastTargetId !== undefined) {
     const cur = world.actors.get(s.lastTargetId);
     if (cur && cur.alive && cur.pos && cur.kind === 'monster') {
       const rule = ruleFor(mc, cur.name);
-      if (rule.attack !== -1) {
-        // keep as target unless very far (>= 2x normal engage range)
-        const engage = rule.skill === 0 ? 4 : 20;
-        if (dist(selfPos, cur.pos) <= engage) return { actor: cur, rule };
-      }
+      if (rule.attack !== -1) return { actor: cur, rule };
     }
-    // current target invalid → clear so we pick fresh
     s.lastTargetId = undefined;
   }
 
