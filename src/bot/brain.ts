@@ -131,7 +131,9 @@ function pickTarget(
   const selfId = world.self.id;
   for (const m of world.actors.values()) {
     if (m.id === selfId || !m.alive || !m.pos) continue;
-    if (m.kind === 'npc') continue;
+    // ONLY confirmed monsters (kind=1 from 0x06 SPAWN, or flag=3/4 boss from 0x3c batch)
+    // avoids InvalidTarget errors from hitting players / warps / self
+    if (m.kind !== 'monster') continue;
     if (!botConfig.attackAll && !matchRule(m.name)) continue;
     const d = dist(selfPos, m.pos);
     if (d < bestD) {

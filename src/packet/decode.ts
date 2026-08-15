@@ -296,17 +296,24 @@ export function decodeAll(bytes: Uint8Array, ts: number): PacketEvent[] {
   if (op === 0x3c && bytes.length >= 5) {
     const sub = u16le(bytes, 1);
     if (sub === 7 || sub === 13 || sub === 4) {
+      // superogira 1264-1305: flag semantics
+      //   1 = other player   3 = mini boss   4 = boss   5 = warp portal
       const out: PacketEvent[] = [];
       let p = 3;
       while (p + 9 <= bytes.length) {
         const id = u32le(bytes, p);
         const x = i16le(bytes, p + 4);
         const y = i16le(bytes, p + 6);
-        // const flag = bytes[p + 8]; — could be used to set kind
+        const flag = bytes[p + 8] ?? 0;
         p += 9;
-        if (id && validCoord(x, y)) {
-          out.push({ op, ts, raw: bytes, kind: 'pos', actorId: id, at: { x, y } });
-        }
+        if (!id || !validCoord(x, y)) continue;
+        // pos event updates position; spawn event carries kind
+        let actorKind: ActorKind = 'unknown';
+        if (flag === 1) actorKind = 'player';
+        else if (flag === 3 || flag === 4) actorKind = 'monster';
+        else if (flag === 5) actorKind = 'npc';
+        // emit spawn with kind first (or update), then pos
+        out.push({ op, ts, raw: bytes, kind: 'spawn', actorId: id, actorKind, at: { x, y } });
       }
       if (out.length > 0) return out;
     }

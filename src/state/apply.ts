@@ -24,7 +24,8 @@ export function applyEvent(world: WorldState, ev: PacketEvent): void {
 
     case 'spawn': {
       const a = world.getOrCreate(ev.actorId, ev.actorKind);
-      a.kind = ev.actorKind;
+      // Prefer the more-specific kind — never demote monster/npc/player back to 'unknown'
+      if (ev.actorKind !== 'unknown' || a.kind === 'unknown') a.kind = ev.actorKind;
       if (ev.name) a.name = ev.name;
       if (ev.at) a.pos = ev.at;
       a.alive = true;
