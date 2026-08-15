@@ -6,7 +6,7 @@ import { loadPickup, watchPickup, pickupFlagFor } from '../config/pickupitems';
 import { loadAvoid, watchAvoid, avoidRuleFor } from '../config/avoid';
 import { loadItemsControl, watchItemsControl } from '../config/items-control';
 import { loadShop, watchShop } from '../config/shop';
-import { buildMove, buildPickup, buildRespawn, buildSkillTarget, buildUseItem } from '../packet/encode';
+import { buildAttack, buildMove, buildPickup, buildRespawn, buildSkillTarget, buildUseItem } from '../packet/encode';
 
 type Send = (bytes: Uint8Array) => void;
 
@@ -171,26 +171,31 @@ function tick(world: WorldState, send: Send, s: BrainState): void {
   const d = dist(self.pos, target.pos);
   const label = `${target.name ?? '?'}#${target.id.toString(16).slice(-4)}`;
 
-  // 5) In range → cast (debounced)
+  // 5) In range → cast skill OR basic attack (skill=0 = physical/melee class)
   if (d <= cfg.attackDistance) {
     if (now - s.lastCastTs >= cfg.attackCastDebounce) {
-      const spBefore = self.sp;
-      console.log(`[brain] cast skill=${rule.skill} lv=${rule.level} on ${label} d=${d.toFixed(1)} (SP=${spBefore ?? '?'})`);
-      send(buildSkillTarget(target.id, rule.skill, rule.level));
+      if (rule.skill === 0) {
+        console.log(`[brain] attack ${label} d=${d.toFixed(1)} (basic 0x0B)`);
+        send(buildAttack(target.id));
+      } else {
+        const spBefore = self.sp;
+        console.log(`[brain] cast skill=${rule.skill} lv=${rule.level} on ${label} d=${d.toFixed(1)} (SP=${spBefore ?? '?'})`);
+        send(buildSkillTarget(target.id, rule.skill, rule.level));
+        s.lastCastSpBefore = spBefore;
+        setTimeout(() => {
+          const spAfter = world.self.sp;
+          const still = world.actors.get(target.id);
+          if (still && !still.alive) return;
+          if (spBefore !== undefined && spAfter !== undefined && spAfter >= spBefore) {
+            console.log(`[brain] ⚠️ cast REJECTED (SP unchanged ${spBefore}→${spAfter})`);
+          } else if (spBefore !== undefined && spAfter !== undefined) {
+            console.log(`[brain] ✓ cast OK (SP ${spBefore}→${spAfter}, -${spBefore - spAfter})`);
+          }
+        }, 1500);
+      }
       s.lastCastTs = now;
       s.lastCastTargetId = target.id;
-      s.lastCastSpBefore = spBefore;
       s.lastActionTs = now;
-      setTimeout(() => {
-        const spAfter = world.self.sp;
-        const still = world.actors.get(target.id);
-        if (still && !still.alive) return;
-        if (spBefore !== undefined && spAfter !== undefined && spAfter >= spBefore) {
-          console.log(`[brain] ⚠️ cast REJECTED (SP unchanged ${spBefore}→${spAfter})`);
-        } else if (spBefore !== undefined && spAfter !== undefined) {
-          console.log(`[brain] ✓ cast OK (SP ${spBefore}→${spAfter}, -${spBefore - spAfter})`);
-        }
-      }, 1500);
     }
     return;
   }
@@ -228,7 +233,7 @@ function pickTarget(
       const hit = world.lastHitBy;
       if (!hit || hit.attackerId !== m.id || Date.now() - hit.ts > 5000) continue;
     }
-    if (!mr.skill) continue; // no skill assigned → can't attack
+    // rule.skill can be 0 = basic melee attack (Swordsman/etc.) — allow
     const d = dist(selfPos, m.pos);
     if (d < bestD) {
       bestD = d;

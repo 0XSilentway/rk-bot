@@ -15,7 +15,8 @@
 #    2  wing when this mob is within teleportSightRange tiles
 #
 # <skill>   skill id to cast on this mob   (RayRag: 11 = Fire Bolt, 12 = Cold Bolt)
-# <level>   skill level to cast            (must match your learned level)
+#           0 = basic melee attack (0x0B) — for Swordsman / Merchant / etc.
+# <level>   skill level to cast            (ignored when skill=0)
 #
 # Multi-word names supported: everything before the last 4 numbers is the name.
 # 'all' sets the default for mobs not listed below.
