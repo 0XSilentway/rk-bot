@@ -77,6 +77,9 @@ export function applyEvent(world: WorldState, ev: PacketEvent): void {
     case 'damage': {
       const a = world.actors.get(ev.victimId);
       if (a) a.lastSeenTs = ev.ts;
+      if (ev.victimId === world.self.id && ev.damage > 0) {
+        world.lastHitByMobTs = ev.ts;
+      }
       return;
     }
 
@@ -89,6 +92,9 @@ export function applyEvent(world: WorldState, ev: PacketEvent): void {
           world.self.id = ev.victimId;
           console.log(`[state] auto-detected playerId = 0x${ev.victimId.toString(16)} via 0x0B repeats`);
         }
+      }
+      if (ev.victimId === world.self.id && ev.attackerId !== world.self.id) {
+        world.lastHitByMobTs = ev.ts;
       }
       return;
     }

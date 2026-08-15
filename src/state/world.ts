@@ -23,6 +23,8 @@ export class WorldState {
   expGainedSession = 0;
   lootedSession = 0;
   lastEventTs = 0;
+  /** Set when a mob deals damage or attacks self. Used by emergency wing. */
+  lastHitByMobTs?: number;
 
   getOrCreate(id: number, kind: Actor['kind'] = 'unknown'): Actor {
     let a = this.actors.get(id);
