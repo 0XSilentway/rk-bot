@@ -74,6 +74,11 @@ export function startMonitor(port: number, world: WorldState, brain: BrainContro
       // API: brain control
       if (url.pathname === '/api/pause' && req.method === 'POST') { brain.pause(); return json({ ok: true }); }
       if (url.pathname === '/api/resume' && req.method === 'POST') { brain.resume(); return json({ ok: true }); }
+      if (url.pathname === '/api/restart' && req.method === 'POST') {
+        console.log('[monitor] restart requested — exiting; start.command loop will respawn');
+        setTimeout(() => process.exit(0), 200);
+        return json({ ok: true });
+      }
       if (url.pathname === '/api/state' && req.method === 'GET') return json(snapshot());
       if (url.pathname === '/api/logs' && req.method === 'GET') return json({ logs: recentLogs() });
 

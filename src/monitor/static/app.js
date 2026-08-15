@@ -106,6 +106,11 @@
   // Controls
   document.getElementById('btnPause').onclick = () => fetch('/api/pause', { method: 'POST' });
   document.getElementById('btnResume').onclick = () => fetch('/api/resume', { method: 'POST' });
+  document.getElementById('btnRestart').onclick = () => {
+    if (!confirm('Restart bot? Bot will exit and start.command loop respawns it (2s).')) return;
+    fetch('/api/restart', { method: 'POST' });
+    setNote('restarting…', 'warn');
+  };
 
   // Config editor
   document.querySelectorAll('.tab').forEach(btn => {
