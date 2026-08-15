@@ -1,157 +1,115 @@
-# RayRag WS protocol — reverse-engineering notes
+# RayRag WS protocol
 
-Session dumps live in `captures/session-*.db`. Query with:
-```sql
-SELECT dir, len, substr(hex(bytes),1,4) as op, hex(bytes) FROM frames
-WHERE dir='send' AND hex(bytes) != '04' ORDER BY seq;
+Server: `websea01.rayrag.com` (Rebuild-Ragnarok Unity WebGL).
+Fully in the clear — no encryption, no obfuscation.
+
+## Framing
+
+- **Opcode = 1 byte** at frame offset 0. (Earlier we incorrectly treated first 2 bytes as opcode; that was op + first-arg byte.)
+- No length prefix; message boundary = WebSocket frame boundary.
+- Multi-byte integers = **little-endian**.
+- Coord encoding varies by context:
+  - Move commands (send): `int16 LE`
+  - Item drop broadcasts (recv): `float32 LE`
+  - Entity position ticks: mixed, needs case-by-case decode
+
+## Send opcodes (client → server)
+
+| Op | Name | Layout | Notes |
+|----|------|--------|-------|
+| `0x02` | ACK | `[02]` | 1B. Sent after login-blob and after warp handshake. |
+| `0x03` | AUTH | `[03] 96 00 ...` | 79B. Auth key blob following login. |
+| `0x04` | HEARTBEAT | `[04]` | 1B. Every ~3s. |
+| `0x07` | MOVE | `[07][x:i16 LE][y:i16 LE]` | 5B. Confirmed in Session B. |
+| `0x08` | LOGIN | `[08] 00 00 00 00 [ulen:1] user [clen:1] char` | 30B. **Plain ASCII creds.** |
+| `0x0B` | ATTACK | `[0B][target:u32 LE]` | 5B. Confirmed in Session F. |
+| `0x0E` | SIT/STAND | `[0E][state:1]` | `1`=sit, `0`=stand. |
+| `0x1D 01` | SKILL_TARGET | `[1D][01][target:u32][skill:u8][lvl:u8]` | 8B. Target skill. Confirmed. |
+| `0x1D 04` | SKILL_GROUND | `[1D][04][x:i16][y:i16][skill:u8][lvl:u8]` | 8B. AoE placed on ground. |
+| `0x1D 05` | SKILL_SELF | `[1D][05][skill:u16 LE][lvl:u8]` | 5B. Buff on self. |
+| `0x29` | RESPAWN | `[29][00]` | 2B. After death. |
+| `0x2C` | CHAT | `[2C][msg_len:u16 LE][utf8 msg][chat_type:1]` | chat_type: 0 nearby, 1 shout, 2 whisper. Cap 200B. |
+| `0x2F` | USE_ITEM | `[2F][item_id:u32 LE][target:u32 LE]` | target `FFFFFFFF` = self. |
+| `0x40 08` | WARP | `[40][map_len:u16 LE][utf8 mapname][x:i16 LE][y:i16 LE][00]` | 16B for `iz_dun00`. Random warp = `x=y=-999`. |
+| `0x4C` | NPC_TALK | `[4C][npc_id:u32 LE]` | Open dialog. |
+| `0x4E` | NPC_NEXT | `[4E]` | Advance dialog. |
+| `0x4F` | NPC_SELECT | `[4F][option_idx:u32 LE]` | Pick menu option. |
+| `0x52` | PICKUP | `[52][drop_id:u32 LE]` | 5B. |
+| `0x56 01` | STORAGE_MOVE | `[56][01][inv_id:u32][amount:u32]` | 10B. Deposit item. `inv_id` = itemId (stackable) or slotId (equip). |
+| `0x56 00` | STORAGE_CLOSE | `[56][00]` | 2B. |
+| `0x57` | SELL_ITEMS | `[57][count:u32 LE]([item_id:u32][count:u32])×N` | `count=0` → cancel sell. |
+
+### Chained flows
+
+- **NPC sell**: `0x4C talk → 0x4E next (maybe multiple) → 0x53 recv sell_open → 0x57 sell_items → 0x5B recv sell_result`
+- **NPC storage**: `0x4C talk → 0x4D recv dialog → 0x4F select storage → 0x56 01 per item → 0x56 00 close`
+- **Warp retry**: on `0x2A recv warp_fail`, try next offset coord (e.g., ±1 tile).
+
+## Recv opcodes (server → client)
+
+| Op | Name | Layout | Notes |
+|----|------|--------|-------|
+| `0x03` | SELECT_CHAR | `[03] ... map ...` | Reply to char select. **Embeds initial mapName** — otherwise `0x12` MAP_NAME does not fire on first login. |
+| `0x06` | SPAWN | `[06] kind ... 0x0F @ off6 [id:u32 @ off7] ... name` | `kind`: 0=player, 1=monster, 2=NPC. Name is UTF-8, truncated if last byte ≥ 0x80. |
+| `0x07` | MOVE_UPDATE | `[07][id:u32][x:i16][y:i16]...` | Position update for any entity (self + others). |
+| `0x0B` | ATTACK_RESULT | `[0B][attacker:u32][victim:u32] ... [dmg:u32 @ off17 optional]` | 34B. Combat broadcast. See gotcha below. |
+| `0x0E` | SIT_STATE | `[0E]...` | Entity sat/stood. |
+| `0x0F` | ENTITY_ACTION | `[0F][id:u32][action:1]` | **`action=3` = monster died (authoritative kill count).** |
+| `0x12` | MAP_NAME | `[12][name...]` | Fires on subsequent map changes. |
+| `0x14` | ENTITY_POS | `[14][id:u32][x:i16][y:i16][flag:1]` | 9B. Snapshot pos. |
+| `0x17` | DAMAGE_V2 | `[17][victim:u32][dmg:u32][x:i16][y:i16][flag:1]` | 14B. **This server sends attack damage HERE, not via 0x0B.** No attacker field. |
+| `0x18` | MONSTER_SKILL | `[18][src:u32][dst:u32][skill:u16]...` | Aggro-tracking source. |
+| `0x1B` | DESPAWN | `[1B][id:u32]` | Entity gone. Guard against false despawns. |
+| `0x1D` | SKILL_RESULT | `[1D][sub:1][src:u32][???][dst:u32][skill:u16] ... [dmg:u32]` | 36B for target skills. |
+| `0x20` | SYS_MESSAGE | `[20][text...]` | Detect substring `"too full"` → inventory full. |
+| `0x22` | EXP_GAIN | `[22][base_total:u32][base_gained:u32][job_total:u32][job_gained:u32]` | 17B. Fires for solo + party + event alike — **do not count kills here.** |
+| `0x24` | DEATH | `[24][id:u32]` | If id === self → player died. |
+| `0x25` | STAT | `[25][id:u32][stat_type:u32][cur:u32][max:u32][flag:1]` | 18B. HP for players. **Only HP; SP is separate (0x27).** |
+| `0x26` | HP_REGEN | `[26][id:u32]...` | ⚠️ **NOT attack. NOT HP update.** Passive regen tick every ~6s with repeated value. |
+| `0x27` | SP_UPDATE | `[27][cur:u32 LE][max:u32 LE]` | 9B. SP only. Session F confirmed 195/195 match. |
+| `0x29` | RESPAWN_ACK | — | Reply to respawn. |
+| `0x2A` | WARP_FAIL | `[2A][reason:1?]` | Invalid warp coord (wall/water). Bot should retry with offset. |
+| `0x2C` | CHAT_IN | `[2C][sender:u32][msg_len:u16][msg][name_len:u16][name][chat_type:1]` | |
+| `0x32` | INVENTORY | `[32][sub:1]...` | Sub-dispatched. Authoritative inventory delta. |
+| `0x36` | DESPAWN_REASON | `[36][id:u32][reason:u32]` | `reason=2` = entity looted. |
+| `0x38` | MAP_DATA | `[38] ... [zeny:u32 @ off9]` | Zone-enter data. |
+| `0x3C` | MINIMAP / ENTITY_LIST | 2 modes: minimap markers OR batched entity list `[3C][count:u16]([id:u32][x:i16][y:i16][flag:1])×N` | Post-warp bulk position dump. |
+| `0x4D` | NPC_DIALOG | `[4D][sub:1]...` | `sub=2` = menu shown; `sub=3` = closed. |
+| `0x51` | ITEM_DROP | `[51][drop_id:u32][x:f32][y:f32][item_id:u16][amount:u16][???]` | 21B. **Coords are float32 here.** |
+| `0x52` | PICKUP_BCAST | `[52][drop_id:u32][actor:u32]` | 9B. Everyone hears this. |
+| `0x53` | SELL_OPEN | — | Sell menu opened. |
+| `0x5B` | SELL_RESULT | `[5B][flag:1]` | `flag > 0` = success. |
+
+## Gotchas (from source code cross-check)
+
+1. **`0x26` is NOT HP update.** It's a passive regen tick that fires every ~6s with the same value. Real HP is in `0x25` STAT (see column `stat_type` for HP/SP/etc.).
+2. **`0x0B` ATTACK_RESULT vs `0x17` DAMAGE_V2 duplication risk.** Some servers only send `0x17`. RayRag sends both — must not double-count damage. Track by attacker+victim+timestamp window.
+3. **`0x22` EXP is not a kill counter.** Party kills, event bonuses, quest rewards all fire it. Count kills via `0x0F action=3` only.
+4. **`0x25` STAT does NOT carry SP for players.** Read SP exclusively from `0x27`.
+5. **playerId discovery**: parse `0x03 SELECT_CHAR` reply on login, OR fallback: if the same victim id appears in ≥3 `0x0B` attack packets against self → assume that's us.
+6. **`0x3C` is dual-purpose**: minimap marker AND post-warp entity list bulk dump. Sub-dispatch on second byte.
+7. **`0x1B` DESPAWN false positives.** Guard: entity may reappear within 500ms. Wait before removing from world state.
+8. **Move packet reflect**: server does NOT echo `0x07 MOVE` sent by client. To confirm your own move applied, wait for a subsequent `0x07 MOVE_UPDATE` with your id, or fall back to `0x14 ENTITY_POS`.
+
+## Self actor id
+
+Observed in Session F: `0x000EC664` — appears as `src` in 0x1D skill result, as actor in 0x26 HP_REGEN. On new login this will change, so must be discovered fresh each session (see gotcha #5).
+
+## Skill IDs
+
+Rebuild-Ragnarok reindexes skill IDs vs classic RO. Session F cast used `0x080C = 2060` (likely Fire Bolt). Build the skill DB from the client's asset bundles (or the `skills.csv`-style file in superogira repo).
+
+## Session archive
+
+- `session-A-initial-recon.db` — initial dump, 370 frames
+- `session-B-move-plain.db` — move obfuscation test → NO obfuscation
+- `session-F-skill-attack.db` — attack + skill + drop + pickup
+
+Query any with:
+```
+bun run inspect captures/session-X.db
 ```
 
-## Session 2026-08-15T02-11-25 (initial recon)
+## Verified externally via superogira/ro-rebuild-web-assist
 
-Char: `Silentway_28` (Thief lvl 18) on map `iz_dun00`. Actions: stand → walk → walk → attack → loot → open inv → open skills → warp → open inv again.
-
-### Send opcodes
-
-| Op (hex, LE first byte first) | Len | Count | Meaning (hypothesis) |
-|-------------------------------|-----|-------|----------------------|
-| `04` | 1 | 24 | Heartbeat / keepalive ping |
-| `02` | 1 | 2 | Ack (after login blob, after warp handshake) |
-| `0800` | 30 | 1 | **Login / char-select**. Payload = ASCII `silentway28\x0cSilentway_28` (username + char name plain text) |
-| `0396` | 79 | 1 | Auth key blob (follows 0800) |
-| `07XX 00 YY 00` | 5 | ~10 | **Move click** — 5-byte packet. Second byte varies (76/78/79/7A/7B/7D) even for the same-looking actions. Two theories: (a) client-side XOR/rolling key obfuscation on the opcode, (b) sequence counter (unlikely, not monotonic). Third byte = 0. Bytes 4-5 = coord? Needs isolation test. |
-| `4008 ...ascii...` | 16 | 1 | **Warp / map change**. Payload starts with ASCII map name (e.g. `iz_dun00`) + 2-byte src coord + 2-byte dst coord + trailer `00`. |
-| `711E ...` | 392 | 2 | Post-warp big handshake blob. Fired twice back-to-back. Probably map assets ready ack or client-state resync. |
-| `0B5F 53 00 00` | 5 | 2 | Skill/attack candidate — 2-byte payload after opcode. `53 00` = little-endian id 0x0053 = **target entity id**? |
-| `52A9 37 00 00` | 5 | 1 | Same shape as above but rare. Could be pickup/interact. |
-
-### Recv opcodes
-
-| Op | Len | Count | Meaning (hypothesis) |
-|----|-----|-------|----------------------|
-| `3C01` | 12 | 191 | **Periodic entity tick** (>50% of all recv). Layout: `3c 01 00 [id:4] [x:2] [y:2] 01 01` — likely mob wander broadcast or self-position echo. |
-| `0B20` | 34 | 14 | Spawn / entity intro (34 bytes = enough for id + name + level + pos). |
-| `175F` | 14 | 14 | ? |
-| `0600` | 67 | 13 | List packet (inventory row / skill row?). |
-| `0720` | 30 | 13 | ? |
-| `074A` | 30 | 7 | ? |
-| `0B5F` | 34 | 6 | Server echo of client 0B5F? |
-| `07E3` `07EB` `07D2` `0760` `075F` `07A1` | 30-31 | ~5 each | Related family (0x07XX) — likely stat/skill/item update. |
-| `2520` | 18 | 5 | ? |
-| `2CD7` | 30 | 3 | ? |
-| `0F60` | 6 | 3 | Small status flip. |
-
-### Big unknowns for Phase 2
-
-1. ~~**Are send opcodes obfuscated?**~~ **RESOLVED in Session B.** No obfuscation. See below.
-2. ~~**Coord encoding.**~~ **RESOLVED in Session B.** Plain int16 LE for x and y.
-3. **Entity id layout.** `0B20` len=34 spawn packet — bytes 3-6 are almost certainly a uint32 entity id. Correlate with `3C01` middle bytes.
-4. **Opcode endianness / length convention.** Move opcode looks like a **1-byte** op (`0x07`), while login is `08 00` (looks like 2-byte). May actually be: all packets have 1-byte op, and multi-byte op is really `op + subcmd`.
-
-## Session F (Test F — attack + skill combo) — 2026-08-15
-
-Char: Mage lvl 21 SP 195/195, target Peco Peco Egg lvl 10. Actions: attack Peco Egg (physical, 2 dmg each), then Fire Bolt (skill 0x080C = 2060), pickup dropped items.
-
-**RESULT — 10+ opcodes decoded. Full damage/exp/drop pipeline mapped.**
-
-### Send opcodes confirmed
-
-| Opcode | Layout | Meaning | Sample |
-|--------|--------|---------|--------|
-| `0B` | `0B <target:u32 LE>` = 5B | **ATTACK** | `0B 8F 1A 00 00` → attack entity 0x1A8F |
-| `1D` | `1D 01 <target:u32> <skill:u16 LE>` = 8B | **SKILL CAST** | `1D 01 8F1A0000 0C08` → skill 2060 on 0x1A8F |
-| `52` | `52 <drop_id:u32 LE>` = 5B | **PICKUP** | `52 9D 59 00 00` → pickup drop 0x599D |
-
-### Recv opcodes confirmed
-
-| Opcode | Layout | Meaning | Notes |
-|--------|--------|---------|-------|
-| `17` | `17 <target:u32> <damage:u32> 2F 00 91 00 <flag:u8>` = 14B | **DAMAGE** | dmg=2 matches "2" hitmark on screen. `2F 00 91 00` seems fixed (maybe attacker id or hit-type). |
-| `22` | `22 <base_total:u32> <base_gained:u32> <job_total:u32> <job_gained:u32>` = 17B | **EXP GAIN** | base 649→681 (+32), job 954→982 (+28) exactly matches char screen |
-| `26` | `26 <actor:u32> ...` = 9B | Actor tick (HP-related?) | all 3 samples identical, needs isolation |
-| `27` | `27 <sp_cur:u32 LE> <sp_max:u32 LE>` = 9B | **SP UPDATE** | Values A9/B9/C3 = 169/185/195, max C3 = 195 matches char screen |
-| `06` len=90 | `06 ...` includes ASCII mob name | **MOB SPAWN** | Contains `Picky` in plain text |
-| `1D` len=36 | `1D 01 <src> FFFFFFFF <target> <skill:u16> <?> <dmg:u32> ...` | **SKILL RESULT** | dmg=77 (0x4D) at offset ~21 |
-| `18` len=21 | ? | Pre-skill echo? | Fired just before 1D result |
-| `51` len=21 | `51 <drop_id:u32> <x:f32> <y:f32> <item:u16> <amt:u16> ...` | **ITEM DROP** | Coords are **float32 LE** here, unlike int16 in move packet |
-| `52` len=9 | `52 <drop_id:u32> <actor:u32>` | **PICKUP CONFIRM** | Broadcast to all players in range |
-| `0B` len=34 x77 | ? | Combat/mob-state broadcast | Dominates during fight — every hit generates one |
-| `0F` len=10 | `0F <actor:u32> <?:u16> 80 BF` | Actor tick | `80 BF` = float -1.0 (0xBF800000) — direction? |
-| `3C` | as before | Position tick | Confirmed generic entity tick |
-
-### Big picture
-
-Combat loop for the bot will be:
-```
-1. Parse 0x06 spawn packets → build mob list (name, id, pos)
-2. Send 0x0B <target_id> to auto-attack (or 0x1D for skill)
-3. Watch 0x17 damage packets to track kill progress
-4. On 0x22 exp gain → mob dead; scan for 0x51 drop packets
-5. Send 0x52 <drop_id> to loot
-```
-
-### Character self-id
-
-- Own actor id observed: `64 C6 0E 00` = **0x000EC664** (appears as `src` in 1D skill, as actor in 26/0F ticks)
-
-### Skill ID mapping
-
-- `0x080C` = 2060 = **Fire Bolt** (or whichever bolt user cast). Vanilla RO Fire Bolt = 14 (0x0E). Rebuild-Ragnarok reindexes skill IDs.
-
-### Coord encoding inconsistency
-
-- Move (client → server): `int16 LE x,y`
-- Drop packet (server → client): `float32 LE x,y`
-- Position tick 0x3C: unclear yet
-
-Bot needs both codecs.
-
-## Session 2026-08-15T03-46-49 (Test B — move obfuscation)
-
-Char: same. Action: stand 15s → click A x3 → click B x2 → refresh + login → click A' x1 → close.
-
-**RESULT — no obfuscation. Plain int16 LE coord.**
-
-### Evidence
-
-| seq | rel t | hex | decode |
-|-----|-------|-----|--------|
-| 24 | +21s | `07 3A 00 89 00` | move to (x=58, y=137) — click A #1 |
-| 28 | +27s | `07 3A 00 89 00` | move to (58, 137) — click A #2 (identical) |
-| 30 | +34s | `07 3A 00 89 00` | move to (58, 137) — click A #3 (identical) |
-| 32 | +39s | `07 35 00 89 00` | move to (53, 137) — click B #1 |
-| 37 | +47s | `07 35 00 89 00` | move to (53, 137) — click B #2 (identical) |
-| 65 | +64s (after reconnect) | `07 31 00 89 00` | move to (49, 137) — plain again, no key reset |
-
-### Decoded packet: CZ_REQUEST_MOVE
-
-```
-byte 0        1        2        3        4
-     +--------+-----------------+-----------------+
-     |  0x07  |  x  (int16 LE)  |  y  (int16 LE)  |
-     +--------+-----------------+-----------------+
-```
-
-Total length = 5 bytes. Confirmed by session A (all `07XX 00YY 00` frames) and session B.
-
-### Reverse-engineering implications
-
-- **Zero cryptography.** No XOR key exchange, no rolling counter, no packet obfuscation of any kind.
-- **Plain-text leaks:**
-  - Login opcode `08 00` payload contains raw ASCII `username\x0cCharname`
-  - Warp opcode `40 08` payload starts with ASCII map name
-- **Phase 4 (bot → server) will be trivial.** Compose bytes and forward via injector.
-
-### Next recon plan (isolated tests)
-
-Each test = fresh login, single controlled action, no walking around:
-
-| Test | Action | What to isolate |
-|------|--------|-----------------|
-| A | Login, stand still 30s, logout | Ping cadence, initial state dump |
-| B | Login, single click at fixed pixel | Move opcode, coord encoding |
-| C | Login, /w someone with a known text | Chat opcode + payload alignment |
-| D | Login, open Inventory, close | UI-only opcodes vs game opcodes |
-| E | Login, use one skill on self (heal/buff) | Skill opcode + target-self flag |
-| F | Login, attack single mob to death | Attack loop, damage packet, mob-death packet |
-
-Each test's DB → own row in this table.
+Every opcode above marked with a layout was cross-referenced against `github.com/superogira/ro-rebuild-web-assist/ro-rebuild-web-assist.user.js` (v4.47, ~6800 lines). Findings match Session A/B/F recon. The 1-byte opcode framing is confirmed by the source; earlier 2-byte reading was our error.
