@@ -26,6 +26,7 @@ export function applyEvent(world: WorldState, ev: PacketEvent): void {
       const a = world.getOrCreate(ev.actorId, ev.actorKind);
       a.kind = ev.actorKind;
       if (ev.name) a.name = ev.name;
+      if (ev.at) a.pos = ev.at;
       a.alive = true;
       a.lastSeenTs = ev.ts;
       return;

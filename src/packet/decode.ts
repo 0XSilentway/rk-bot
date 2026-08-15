@@ -56,7 +56,11 @@ export function decodeFrame(bytes: Uint8Array, ts: number): PacketEvent {
     }
 
     case 0x06: {
-      // SPAWN: [06][kind:1][pad][0x0F marker @6][id:u32 @7]...ASCII name later
+      // SPAWN layout (RE'd from Session F Picky sample):
+      //   0x00 op(06)  0x01 kind?  0x02..05 ?  0x06 marker 0x0F  0x07..0A id:u32
+      //   ...  name_len:u32 @0x18 + UTF8 name @0x1C  ...
+      //   Right after the name (offset 0x18 + 4 + name_len + 3), a pair of
+      //   u32 LE values that look like world coords (e.g. Picky at 63,123).
       if (bytes.length < 27) return { ...base, kind: 'unknown' };
       const kindByte = bytes[1] ?? 0xff;
       let actorKind: ActorKind = 'unknown';
@@ -64,8 +68,29 @@ export function decodeFrame(bytes: Uint8Array, ts: number): PacketEvent {
       else if (kindByte === 1) actorKind = 'monster';
       else if (kindByte === 2) actorKind = 'npc';
       const actorId = u32le(bytes, 7);
-      const name = scanAscii(bytes.subarray(26));
-      return { ...base, kind: 'spawn', actorId, actorKind, name };
+
+      // Name at offset 0x1c, length in u32 LE at 0x18 (best-guess from sample)
+      let name: string | undefined;
+      let posX: number | undefined;
+      let posY: number | undefined;
+      if (bytes.length >= 0x1c + 4) {
+        const nameLen = u32le(bytes, 0x18);
+        if (nameLen > 0 && nameLen < 32 && bytes.length >= 0x1c + nameLen + 11) {
+          name = new TextDecoder('utf-8', { fatal: false }).decode(
+            bytes.subarray(0x1c, 0x1c + nameLen),
+          );
+          const posOff = 0x1c + nameLen + 3;
+          posX = u32le(bytes, posOff);
+          posY = u32le(bytes, posOff + 4);
+          if (posX > 500 || posY > 500) {
+            posX = undefined;
+            posY = undefined;
+          }
+        }
+      }
+      if (!name) name = scanAscii(bytes.subarray(26));
+      const at = posX !== undefined && posY !== undefined ? { x: posX, y: posY } : undefined;
+      return { ...base, kind: 'spawn' as const, actorId, actorKind, name, at };
     }
 
     case 0x07: {
@@ -212,9 +237,10 @@ export function decodeFrame(bytes: Uint8Array, ts: number): PacketEvent {
     }
 
     case 0x52: {
-      // PICKUP_BCAST: [52][drop_id:u32][actor:u32]
+      // PICKUP_BCAST: [52][actor:u32][drop_id:u32] — layout confirmed from Session F
+      // (52 64 c6 0e 00 9d 59 00 00 → actor=0xEC664, drop=0x599D)
       if (bytes.length < 9) return { ...base, kind: 'unknown' };
-      return { ...base, kind: 'pickup_bcast', dropId: u32le(bytes, 1), actorId: u32le(bytes, 5) };
+      return { ...base, kind: 'pickup_bcast', actorId: u32le(bytes, 1), dropId: u32le(bytes, 5) };
     }
 
     default:

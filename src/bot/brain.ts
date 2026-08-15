@@ -7,8 +7,11 @@ type Send = (bytes: Uint8Array) => void;
 
 interface BrainState {
   lastMoveTs: number;
+  lastMoveTo?: { x: number; y: number };
   lastCastTs: number;
   lastPickupTs: Map<number, number>;
+  pickupAttempts: Map<number, number>;
+  giveupDrops: Set<number>;
   lastTargetId?: number;
   paused: boolean;
 }
@@ -18,6 +21,8 @@ export function startBrain(world: WorldState, send: Send): BrainState {
     lastMoveTs: 0,
     lastCastTs: 0,
     lastPickupTs: new Map(),
+    pickupAttempts: new Map(),
+    giveupDrops: new Set(),
     paused: !botConfig.enabled,
   };
 
@@ -55,8 +60,18 @@ function tick(world: WorldState, send: Send, s: BrainState): void {
   const drop = pickupTarget(world, self.pos, s, now);
   if (drop) {
     const last = s.lastPickupTs.get(drop.dropId) ?? 0;
-    if (now - last > 800) {
-      console.log(`[brain] pickup drop 0x${drop.dropId.toString(16)} item=${drop.itemId}`);
+    if (now - last > 1500) {
+      const attempts = (s.pickupAttempts.get(drop.dropId) ?? 0) + 1;
+      s.pickupAttempts.set(drop.dropId, attempts);
+      if (attempts > 4) {
+        console.log(`[brain] give up on drop 0x${drop.dropId.toString(16)} (${attempts} tries)`);
+        s.giveupDrops.add(drop.dropId);
+        world.drops.delete(drop.dropId);
+        return;
+      }
+      console.log(
+        `[brain] pickup drop 0x${drop.dropId.toString(16)} item=${drop.itemId} try=${attempts}`,
+      );
       send(buildPickup(drop.dropId));
       s.lastPickupTs.set(drop.dropId, now);
     }
@@ -88,11 +103,19 @@ function tick(world: WorldState, send: Send, s: BrainState): void {
   // 6) Out of range → move toward, but stop within range
   if (now - s.lastMoveTs < botConfig.moveDebounceMs) return;
   const step = stepToward(self.pos, target.pos, botConfig.castRangeCells - botConfig.approachStopShortCells);
+  // don't resend same coord unless we've been idle a while
+  if (
+    s.lastMoveTo &&
+    s.lastMoveTo.x === step.x &&
+    s.lastMoveTo.y === step.y &&
+    now - s.lastMoveTs < 3000
+  ) return;
   console.log(
     `[brain] move to (${step.x},${step.y}) toward ${target.name}#${target.id.toString(16).slice(-4)} (d=${d.toFixed(1)})`,
   );
   send(buildMove(step.x, step.y));
   s.lastMoveTs = now;
+  s.lastMoveTo = step;
 }
 
 function pickTarget(world: WorldState, selfPos: { x: number; y: number }): Actor | undefined {
@@ -121,9 +144,10 @@ function pickupTarget(
   let best: Drop | undefined;
   let bestD = Infinity;
   for (const d of world.drops.values()) {
+    if (s.giveupDrops.has(d.dropId)) continue;
     const age = now - d.spawnedTs;
     if (age > botConfig.lootMaxAgeMs) continue;
-    if (age < 500) continue; // let drop animation settle
+    if (age < 500) continue;
     const dd = dist(selfPos, d.at);
     if (dd > botConfig.lootRangeCells) continue;
     if (dd < bestD) {

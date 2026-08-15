@@ -14,6 +14,7 @@ export interface EvSpawn extends DecodedBase {
   actorId: number;
   actorKind: ActorKind;
   name?: string;
+  at?: Coord;
 }
 
 export interface EvMove extends DecodedBase {
