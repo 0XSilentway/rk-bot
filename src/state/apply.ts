@@ -9,6 +9,15 @@ const STAT_SP = 1;
 // where victim != attacker, assume that's us. (Fallback if 0x03 select_char miss.)
 const victimHits = new Map<number, number>();
 
+function clearDeathIfRespawned(world: WorldState, ts: number): void {
+  if (world.self.dead && world.self.deadSince && ts > world.self.deadSince + 500) {
+    world.self.dead = false;
+    world.self.respawnedTs = ts;
+    world.self.deadSince = undefined;
+    console.log('[state] ✨ respawn confirmed via self move');
+  }
+}
+
 export function applyEvent(world: WorldState, ev: PacketEvent): void {
   world.lastEventTs = ev.ts;
 
@@ -36,10 +45,13 @@ export function applyEvent(world: WorldState, ev: PacketEvent): void {
     case 'move': {
       const a = world.getOrCreate(ev.actorId);
       a.posTo = ev.to;
-      a.pos = ev.to; // best-effort: overwrite every move
+      a.pos = ev.to;
       a.alive = true;
       a.lastSeenTs = ev.ts;
-      if (ev.actorId === world.self.id) world.self.pos = ev.to;
+      if (ev.actorId === world.self.id) {
+        world.self.pos = ev.to;
+        clearDeathIfRespawned(world, ev.ts);
+      }
       return;
     }
 
@@ -48,7 +60,10 @@ export function applyEvent(world: WorldState, ev: PacketEvent): void {
       a.pos = ev.at;
       a.posTo = undefined;
       a.lastSeenTs = ev.ts;
-      if (ev.actorId === world.self.id) world.self.pos = ev.at;
+      if (ev.actorId === world.self.id) {
+        world.self.pos = ev.at;
+        clearDeathIfRespawned(world, ev.ts);
+      }
       return;
     }
 
@@ -136,7 +151,11 @@ export function applyEvent(world: WorldState, ev: PacketEvent): void {
       return;
 
     case 'death':
-      if (ev.actorId === world.self.id) world.self.dead = true;
+      if (ev.actorId === world.self.id) {
+        world.self.dead = true;
+        world.self.deadSince = ev.ts;
+        console.log('[state] 💀 self died');
+      }
       return;
 
     case 'sys_message': {

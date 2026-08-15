@@ -71,18 +71,29 @@ function tick(world: WorldState, send: Send, s: BrainState): void {
   const self = world.self;
   if (!self.id || !self.pos) return;
 
-  // 1) Dead → respawn
+  const now = Date.now();
+
+  // 1) Dead → keep sending respawn until server confirms (self move fires).
+  //    apply.ts clears self.dead when a self position event arrives after death.
   if (self.dead) {
-    if (Date.now() - s.lastCastTs > 3000) {
-      console.log('[brain] respawn');
+    if (now - s.lastCastTs > 3000) {
+      console.log('[brain] respawn (retry)');
       send(buildRespawn());
-      s.lastCastTs = Date.now();
-      self.dead = false;
+      s.lastCastTs = now;
     }
     return;
   }
 
-  const now = Date.now();
+  // 1b) Just respawned → warp back to farm once
+  if (self.respawnedTs && now - self.respawnedTs < 5000) {
+    if (cfg.farmMap && cfg.farmX && cfg.farmY) {
+      console.log(`[brain] 🔙 post-respawn → warp farm ${cfg.farmMap}(${cfg.farmX},${cfg.farmY})`);
+      send(buildWarp(cfg.farmMap, cfg.farmX, cfg.farmY));
+    }
+    self.respawnedTs = undefined;
+    s.lastActionTs = now;
+    return;
+  }
 
   // 1b) avoid.txt — any sighted player matches → wing (highest priority)
   const av = loadAvoid();

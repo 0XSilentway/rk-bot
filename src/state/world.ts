@@ -13,6 +13,10 @@ export class WorldState {
     baseExp: undefined as number | undefined,
     jobExp: undefined as number | undefined,
     dead: false,
+    /** timestamp when 0x24 DEATH self fired; cleared when we see self move again */
+    deadSince: undefined as number | undefined,
+    /** timestamp when a move after death fires — used by brain to trigger farm return */
+    respawnedTs: undefined as number | undefined,
   };
 
   actors = new Map<number, Actor>();
