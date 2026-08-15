@@ -9,10 +9,13 @@ interface BrainState {
   lastMoveTs: number;
   lastMoveTo?: { x: number; y: number };
   lastCastTs: number;
+  lastCastTargetId?: number;
+  lastCastSpBefore?: number;
   lastPickupTs: Map<number, number>;
   pickupAttempts: Map<number, number>;
   giveupDrops: Set<number>;
   lastTargetId?: number;
+  lastActionTs: number;
   paused: boolean;
 }
 
@@ -23,6 +26,7 @@ export function startBrain(world: WorldState, send: Send): BrainState {
     lastPickupTs: new Map(),
     pickupAttempts: new Map(),
     giveupDrops: new Set(),
+    lastActionTs: Date.now(),
     paused: !botConfig.enabled,
   };
 
@@ -80,7 +84,20 @@ function tick(world: WorldState, send: Send, s: BrainState): void {
 
   // 4) Find target
   const picked = pickTarget(world, self.pos);
-  if (!picked) return;
+  if (!picked) {
+    // no target → roam if idle too long
+    if (now - s.lastActionTs > botConfig.roamIdleMs && now - s.lastMoveTs > 2000) {
+      const r = botConfig.roamRadius;
+      const rx = Math.round(self.pos.x + (Math.random() * 2 - 1) * r);
+      const ry = Math.round(self.pos.y + (Math.random() * 2 - 1) * r);
+      console.log(`[brain] roam → (${rx},${ry})`);
+      send(buildMove(rx, ry));
+      s.lastMoveTs = now;
+      s.lastMoveTo = { x: rx, y: ry };
+      s.lastActionTs = now;
+    }
+    return;
+  }
   const { actor: target, skill } = picked;
   if (!target.pos) return;
   const d = dist(self.pos, target.pos);
@@ -93,10 +110,15 @@ function tick(world: WorldState, send: Send, s: BrainState): void {
       console.log(`[brain] cast skill=${skill.id} lv=${skill.level} on ${label} d=${d.toFixed(1)} (SP before=${spBefore ?? '?'})`);
       send(buildSkillTarget(target.id, skill.id, skill.level));
       s.lastCastTs = now;
+      s.lastCastTargetId = target.id;
+      s.lastCastSpBefore = spBefore;
       s.lastTargetId = target.id;
-      // check if cast actually took effect
+      s.lastActionTs = now;
       setTimeout(() => {
         const spAfter = world.self.sp;
+        const still = world.actors.get(target.id);
+        // suppress REJECTED noise if target already died (natural race)
+        if (still && (!still.alive || still.id !== s.lastCastTargetId)) return;
         if (spBefore !== undefined && spAfter !== undefined && spAfter >= spBefore) {
           console.log(`[brain] ⚠️ cast REJECTED (SP unchanged ${spBefore}→${spAfter})`);
         } else if (spBefore !== undefined && spAfter !== undefined) {
@@ -120,6 +142,7 @@ function tick(world: WorldState, send: Send, s: BrainState): void {
   send(buildMove(step.x, step.y));
   s.lastMoveTs = now;
   s.lastMoveTo = step;
+  s.lastActionTs = now;
 }
 
 function pickTarget(

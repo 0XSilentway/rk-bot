@@ -43,6 +43,11 @@ export const botConfig = {
   /** if own HP percentage drops below this, disengage (do NOT continue attacking) */
   disengageHpPct: 30,
 
+  /** if no target found for N ms, roam to a random nearby tile */
+  roamIdleMs: 4000,
+  /** roam step size in tiles (± random on both axes) */
+  roamRadius: 15,
+
   /** monster targeting rules — first match wins.
    *  Skill IDs (RayRag): 12 = Cold/Frost Bolt.
    *  Fire Bolt id TBD — capture your own cast then update.
