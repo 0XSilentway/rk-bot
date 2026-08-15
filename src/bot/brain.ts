@@ -89,10 +89,20 @@ function tick(world: WorldState, send: Send, s: BrainState): void {
   // 5) In range → cast skill (with debounce)
   if (d <= botConfig.castRangeCells) {
     if (now - s.lastCastTs >= botConfig.castDebounceMs) {
-      console.log(`[brain] cast skill=${skill.id} lv=${skill.level} on ${label} d=${d.toFixed(1)}`);
+      const spBefore = self.sp;
+      console.log(`[brain] cast skill=${skill.id} lv=${skill.level} on ${label} d=${d.toFixed(1)} (SP before=${spBefore ?? '?'})`);
       send(buildSkillTarget(target.id, skill.id, skill.level));
       s.lastCastTs = now;
       s.lastTargetId = target.id;
+      // check if cast actually took effect
+      setTimeout(() => {
+        const spAfter = world.self.sp;
+        if (spBefore !== undefined && spAfter !== undefined && spAfter >= spBefore) {
+          console.log(`[brain] ⚠️ cast REJECTED (SP unchanged ${spBefore}→${spAfter})`);
+        } else if (spBefore !== undefined && spAfter !== undefined) {
+          console.log(`[brain] ✓ cast OK (SP ${spBefore}→${spAfter}, -${spBefore - spAfter})`);
+        }
+      }, 1500);
     }
     return;
   }
