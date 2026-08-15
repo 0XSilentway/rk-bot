@@ -16,13 +16,13 @@ interface BrainState {
   lastCastTs: number;
   lastCastTargetId?: number;
   lastCastSpBefore?: number;
+  lastTargetId?: number;   // sticky current target — cleared when it dies or leaves range
   lastPickupTs: Map<number, number>;
   pickupAttempts: Map<number, number>;
   giveupDrops: Set<number>;
   lastActionTs: number;
   lastWingTs: number;
   paused: boolean;
-  /** true when bot auto-warped home for storage; user resumes to return to farm */
   atHomeForStorage: boolean;
 }
 
@@ -173,7 +173,7 @@ function tick(world: WorldState, send: Send, s: BrainState): void {
   }
 
   // 4) Target picking (uses mon_control per-mob rule)
-  const picked = pickTarget(world, cfg, self.pos);
+  const picked = pickTarget(world, cfg, self.pos, s);
   if (!picked) {
     if (cfg.roamAuto && now - s.lastActionTs > cfg.roamIdleMs && now - s.lastMoveTs > 2000) {
       const r = cfg.roamRadius;
@@ -237,25 +237,39 @@ function pickTarget(
   world: WorldState,
   _cfg: BotConfig,
   selfPos: { x: number; y: number },
+  s: BrainState,
 ): { actor: Actor; rule: MonRule } | undefined {
   const mc = loadMonControl();
+  const selfId = world.self.id;
+
+  // Stick with current target if still valid — avoids flip-flopping when a
+  // closer mob wanders in mid-fight.
+  if (s.lastTargetId !== undefined) {
+    const cur = world.actors.get(s.lastTargetId);
+    if (cur && cur.alive && cur.pos && cur.kind === 'monster') {
+      const rule = ruleFor(mc, cur.name);
+      if (rule.attack !== -1) {
+        // keep as target unless very far (>= 2x normal engage range)
+        const engage = rule.skill === 0 ? 4 : 20;
+        if (dist(selfPos, cur.pos) <= engage) return { actor: cur, rule };
+      }
+    }
+    // current target invalid → clear so we pick fresh
+    s.lastTargetId = undefined;
+  }
+
   let best: Actor | undefined;
   let bestRule: MonRule | undefined;
   let bestD = Infinity;
-  const selfId = world.self.id;
   for (const m of world.actors.values()) {
     if (m.id === selfId || !m.alive || !m.pos) continue;
     if (m.kind !== 'monster') continue;
     const mr = ruleFor(mc, m.name);
-    // attack==1: always
-    // attack==0: only if this mob has hit us recently (defensive)
-    // attack==-1: never
     if (mr.attack === -1) continue;
     if (mr.attack === 0) {
       const hit = world.lastHitBy;
       if (!hit || hit.attackerId !== m.id || Date.now() - hit.ts > 5000) continue;
     }
-    // rule.skill can be 0 = basic melee attack (Swordsman/etc.) — allow
     const d = dist(selfPos, m.pos);
     if (d < bestD) {
       bestD = d;
@@ -264,6 +278,7 @@ function pickTarget(
     }
   }
   if (!best || !bestRule) return undefined;
+  s.lastTargetId = best.id;
   return { actor: best, rule: bestRule };
 }
 

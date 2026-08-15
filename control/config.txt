@@ -56,7 +56,7 @@ homeX 159
 homeY 362
 
 # Where to warp back to after storage (your farm spot)
-farmMap moc_fld17
+farmMap prt_sewb2
 farmX 250
 farmY 210
 
