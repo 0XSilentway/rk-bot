@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { decodeFrame } from '../packet/decode';
+import { decodeAll } from '../packet/decode';
 import { applyEvent } from '../state/apply';
 import { WorldState } from '../state/world';
 import { join } from 'node:path';
@@ -32,11 +32,13 @@ const rows = db
 
 for (const r of rows) {
   const b = new Uint8Array(r.bytes);
-  const ev = decodeFrame(b, r.ts);
-  applyEvent(world, ev);
-  recv++;
-  opCounts.set(ev.op, (opCounts.get(ev.op) ?? 0) + 1);
-  if (ev.kind === 'unknown') unknown++;
+  const evs = decodeAll(b, r.ts);
+  for (const ev of evs) {
+    applyEvent(world, ev);
+    recv++;
+    opCounts.set(ev.op, (opCounts.get(ev.op) ?? 0) + 1);
+    if (ev.kind === 'unknown') unknown++;
+  }
 }
 
 console.log(`\nreplayed ${recv} recv frames, ${unknown} unknown (${((unknown / recv) * 100).toFixed(1)}%)\n`);

@@ -1,5 +1,5 @@
 import { openRawLog, type RawLog } from '../persist/raw-log';
-import { decodeFrame } from '../packet/decode';
+import { decodeAll } from '../packet/decode';
 import { applyEvent } from '../state/apply';
 import { WorldState } from '../state/world';
 import { startDashboard } from '../state/dashboard';
@@ -135,8 +135,7 @@ function handle(
       if (dir === 'recv' && bytes) {
         if (typeof msg.id === 'number') setActiveWs(msg.id);
         try {
-          const ev = decodeFrame(bytes, msg.ts);
-          applyEvent(world, ev);
+          for (const ev of decodeAll(bytes, msg.ts)) applyEvent(world, ev);
         } catch (e) {
           console.warn('[relay] decode error', e);
         }

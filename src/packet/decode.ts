@@ -171,6 +171,29 @@ export function decodeFrame(bytes: Uint8Array, ts: number): PacketEvent {
       return { ...base, kind: 'sp', cur: u32le(bytes, 1), max: u32le(bytes, 5) };
     }
 
+    case 0x38: {
+      // MAP_DATA (zone-enter): [38][?...][zeny:u32 @9]... possibly incl self pos
+      // superogira notes offset 9 for zeny, but pos may be earlier — try (u16le@1, u16le@3)
+      if (bytes.length < 13) return { ...base, kind: 'unknown' };
+      return { ...base, kind: 'unknown' }; // TODO: locate self pos offset
+    }
+
+    case 0x3c: {
+      // ENTITY_LIST or MINIMAP; batch layout guess: [3c][sub:1][count:u16][entry:9]*
+      // Only emit first entry (best-effort). Full batch handled via decodeAll().
+      if (bytes.length < 4) return { ...base, kind: 'unknown' };
+      const count = u16le(bytes, 2);
+      const entrySize = 9;
+      const headerSize = 4;
+      if (count > 0 && count < 200 && bytes.length >= headerSize + entrySize) {
+        const id = u32le(bytes, headerSize);
+        const x = i16le(bytes, headerSize + 4);
+        const y = i16le(bytes, headerSize + 6);
+        return { ...base, kind: 'pos', actorId: id, at: { x, y } };
+      }
+      return { ...base, kind: 'unknown' };
+    }
+
     case 0x36: {
       // DESPAWN_REASON: [36][id:u32][reason:u32]
       if (bytes.length < 9) return { ...base, kind: 'unknown' };
@@ -197,4 +220,29 @@ export function decodeFrame(bytes: Uint8Array, ts: number): PacketEvent {
     default:
       return { ...base, kind: 'unknown' };
   }
+}
+
+/**
+ * Like decodeFrame but expands batch packets (0x3c entity list) into
+ * multiple events, one per entity entry.
+ */
+export function decodeAll(bytes: Uint8Array, ts: number): PacketEvent[] {
+  const op = bytes[0] ?? 0;
+  if (op === 0x3c && bytes.length >= 4) {
+    const count = u16le(bytes, 2);
+    const entrySize = 9;
+    const headerSize = 4;
+    if (count > 0 && count < 200 && bytes.length >= headerSize + count * entrySize) {
+      const out: PacketEvent[] = [];
+      for (let i = 0; i < count; i++) {
+        const off = headerSize + i * entrySize;
+        const id = u32le(bytes, off);
+        const x = i16le(bytes, off + 4);
+        const y = i16le(bytes, off + 6);
+        out.push({ op, ts, raw: bytes, kind: 'pos', actorId: id, at: { x, y } });
+      }
+      return out;
+    }
+  }
+  return [decodeFrame(bytes, ts)];
 }
